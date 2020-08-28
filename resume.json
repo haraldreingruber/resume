@@ -1,0 +1,395 @@
+{
+  "$schema": "https://json.schemastore.org/resume",
+  "basics": {
+    "name": "Harald Reingruber",
+    "label": "Visual- and Spatial-Computing Crafter and Mob-Programming Advocate",
+    "image": "",
+    "email": "harald.reingruber@gmail.com",
+    "phone": "",
+    "url": "",
+    "summary": "Areas of Expertise\n    Professional:\n    • Augmented reality\n    • Real-time Graphics\n    • Information visualization\n    • Volume rendering\n    • Image processing, medical image processing\n    University:\n    • Computer vision\n    • Pattern recognition and machine learning\n    • Object/feature detection and tracking\n\t\nWhat I like\n    • Simple but clever solutions to complicated or complex problems\n    • Profiling performance and memory consumption\n    • Continuous improvement\n    • Clean, readable code\n    • The boy scout rule\n    • Working as a team\n    • Hands-on attitude\n    • Fixing root causes instead of symptoms",
+    "location": {
+      "address": "Scharnstein, Upper Austria, Austria",
+      "postalCode": "",
+      "city": "",
+      "countryCode": "DE",
+      "region": ""
+    },
+    "profiles": [
+      {
+        "network": "LinkedIn",
+        "username": "HaraldReingruber",
+        "url": "https://www.linkedin.com/in/HaraldReingruber/"
+      },
+      {
+        "network": "Twitter",
+        "username": "Harald3DCV",
+        "url": "https://twitter.com/Harald3DCV"
+      }
+    ]
+  },
+  "work": [
+    {
+      "name": "Self Employed",
+      "endDate": "",
+      "highlights": [],
+      "position": "Mob-Programming on Open Source Software Meetup Organizer",
+      "startDate": "2020-05-31",
+      "summary": "Creating a Mob-Programming Community in Austria and connecting it internationally.",
+      "url": ""
+    },
+    {
+      "name": "Self Employed",
+      "endDate": "2020-05-31",
+      "highlights": [],
+      "position": "Pair- and Mob-Programming Tour",
+      "startDate": "2019-11-30",
+      "summary": "Practicing TDD, Pair- and Mob-Programming using various programming languages and environments with teams all over the world.\n\nCheck out the tour schedule and description in my blog article: https://dev.to/Harald3DCV/pair-programming-tour-invite-me-for-free-sessions-sf-bay-area-5eci",
+      "url": ""
+    },
+    {
+      "name": "three10",
+      "endDate": "2019-10-31",
+      "highlights": [],
+      "position": "Software Engineer - Unity 3D/Node.js/React/TypeScript",
+      "startDate": "2016-09-30",
+      "summary": "The three10 software allows giving presentations using 2D and 3D media content synchronized across multiple devices. For example, a mobile device can be used for remote-controlling the presentation while a high-end graphics device is visualizing the presentation on a high-resolution video wall.\nAs one of two principal engineers in a team of 6 developers, I am the main responsible engineer for the secure communication and file transfer between the Unity 3D application and the on-premise backend server. The architecture of the Docker/TypeScript/React/Node.js backend software is also one of my responsibilities. \n\nMost notable achievements:\n• Implemented a JavaScript library for streaming server-side Unity 3D graphics in real-time from a cloud server to an HTML5 browser using a low-latency video codec.\n• Implemented HTML5 Server-Sent-Events for pushing data updates from the backend server to the Unity 3D client software (C# client implementation, as well as Node.js server implementation).\n• Implemented a Docker deployment pipeline for our on-premise backend software, in order to minimize the impact of running the software on various operating systems and versions.\n• Implemented screen capturing and streaming over the network.\n• Became the go-to guy for Git, Docker, Gitlab, Gitlab CI and Unity Cloud Build.\n• Pricipal technical contact during the Audi software security certification process.",
+      "url": ""
+    },
+    {
+      "name": "ViewAR",
+      "endDate": "2016-08-31",
+      "highlights": [],
+      "position": "Software Engineer (Augmented Reality) - C++/Objective-C/Java",
+      "startDate": "2015-04-30",
+      "summary": "The ViewAR application framework combines a native C++ core, with an HTML5 User Interface allowing low-effort User Interface customization and supports multiple platforms (iOS, Android, Windows).\nAs the principal engineer in the C++ team, I was responsible for extending and improving the ViewAR core module and integrating the latest third-party Augmented and Virtual Reality SDKs.\n \nMost notable achievements:\n• Computing watertight (hole-free) 3D triangle mesh from 3D models captured with depth-sensing cameras. Furthermore, an algorithm for computing the volume of the scanned objects has been implemented.\n• Cross-compiling the ViewAR C++ core using Emscripten/WebAssembly to JavaScript and WebGL\n• Integrated video decoding in order to support video textures in 3D",
+      "url": ""
+    },
+    {
+      "name": "Agfa HealthCare",
+      "endDate": "2015-04-30",
+      "highlights": [],
+      "position": "3D Volume Rendering Engineer, C++",
+      "startDate": "2013-10-31",
+      "summary": "I have been the main engineer responsible for extending and maintaining Agfa’s volume rendering engine, in a team of 8 engineers located in Austria, Belgium, and Canada. The engine supports GPU and CPU rendering, the CPU version heavily uses SIMD instructions for boosting the CPU rendering performance.\n\nMost notable achievements:\n    • Implemented bi-cubic filtering for improving the resampling quality of low-resolution images using WebGL\n    • Implemented a CMake build system, in order to replace the separate build scripts for several platforms",
+      "url": ""
+    },
+    {
+      "name": "Agfa Healthcare",
+      "endDate": "2013-09-30",
+      "highlights": [],
+      "position": "Software Engineer, 3D Visualization, Java",
+      "startDate": "2010-09-30",
+      "summary": "In a team of 22 people, I was responsible for implementing and maintaining 3D visualization features and the loading of volume image data.\n\nMost notable achievements:\n• Implemented progressive loading of volume image data (patent granted)\n• Visualization of the normal plane in the unfolded blood vessel view\n• Improved visualization of the intersection of 2D annotations with the current view plane (semi-transparent rendering of the part overlapping with the adjacent slice)",
+      "url": ""
+    },
+    {
+      "name": "AIT - Austrian Institute of Technology",
+      "endDate": "2010-08-31",
+      "highlights": [],
+      "position": "Master thesis, Computer Vision, Matlab",
+      "startDate": "2009-10-31",
+      "summary": "The aim of my master thesis was to improve 3D reconstruction accuracy of a stereo camera system using special image sensors which only transmits data for the pixels sensing light intensity changes (for example movements).\n\nMost notable achievement:\n• Improved image quality/sharpness by adjusting the retention time of pixel events depending on the event density, which is an indicator for the movement velocity",
+      "url": ""
+    },
+    {
+      "name": "Computer Vision Center",
+      "endDate": "2009-07-31",
+      "highlights": [],
+      "position": "Final year project, Feature Detection, Matlab",
+      "startDate": "2009-02-28",
+      "summary": "The aim of this project was to develop a method supporting the automatic analysis of capsule endoscopy studies in order to handle the large amount of image data in the daily clinical routine.\n\nMost notable achievement:\n• Implemented a Support Vector Machines (SVM) detector for detecting intestinal content (71 % accuracy)",
+      "url": ""
+    }
+  ],
+  "volunteer": [
+    {
+      "organization": "Jugend Umwelt Platform (environmental youth organization)",
+      "position": "Member of advisory board",
+      "url": "",
+      "startDate": "2014-02-28",
+      "endDate": "2017-02-28",
+      "summary": null,
+      "highlights": []
+    },
+    {
+      "organization": "Green Team, Frequency Festival",
+      "position": "Anti-litter campaign, group leader",
+      "url": "",
+      "startDate": "2013-08-31",
+      "endDate": "2013-08-31",
+      "summary": "I was leading a group of volunteers performing an anti-littering campaign on the camping site at the Frequency Festival (approx. 50,000 daily attendees).",
+      "highlights": []
+    },
+    {
+      "organization": "Austrian Red Cross",
+      "position": "Emergency Medical Responder & Ambulance Driver",
+      "url": "https://www.linkedin.com/company/2084265",
+      "startDate": "2004-09-30",
+      "endDate": "2010-12-31",
+      "summary": "Alternative civilian service (full time) for 1 year and volunteer (approx. 1-2 twelve-hour shifts per month) for 5 years.",
+      "highlights": []
+    }
+  ],
+  "education": [
+    {
+      "institution": "Secondary School of Engineering, Leonding",
+      "area": "Computing and Organization",
+      "studyType": "High School Diploma",
+      "startDate": "1999-12-31",
+      "endDate": "2004-12-31",
+      "gpa": "",
+      "courses": []
+    },
+    {
+      "institution": "Vienna University of Technology",
+      "area": "Visual Computing",
+      "studyType": "Master of Science (MSc)",
+      "startDate": "2007-12-31",
+      "endDate": "2011-12-31",
+      "gpa": "",
+      "courses": []
+    },
+    {
+      "institution": "University of Applied Sciences Upper Austria",
+      "area": "Medical Software Engineering",
+      "studyType": "Bachelor of Science (BSc)",
+      "startDate": "2005-12-31",
+      "endDate": "2007-12-31",
+      "gpa": "",
+      "courses": []
+    },
+    {
+      "institution": "Universitat Autònoma de Barcelona",
+      "area": "Visual Computing",
+      "studyType": "Study abroad",
+      "startDate": "2009-12-31",
+      "endDate": "2009-12-31",
+      "gpa": "",
+      "courses": []
+    }
+  ],
+  "awards": [],
+  "publications": [],
+  "skills": [
+    {
+      "name": "C++",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Java",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Image Processing",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Scrum",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Agfa HealthCare",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "SSE",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Continuous Improvement",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Docker",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Node.js",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "CMake",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Jenkins",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "SIMD",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Unity",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "OpenCV",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Boost",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Subversion",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Augmented Reality",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "HLSL",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Unit Testing",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Git",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "GLSL",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "AppCode",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Volume Rendering",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Pattern Recognition",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "React Native",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "JavaScript",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "WebGL",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Xcode",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Emscripten",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "WebAssembly",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Unity3D",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Clean Code",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "C#",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Objective-C",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Computer Graphics",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "OpenCL",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "DirectX",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Kanban",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "OpenGL",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "DICOM",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "AVX",
+      "level": "",
+      "keywords": []
+    },
+    {
+      "name": "Real-time Graphics",
+      "level": "",
+      "keywords": []
+    }
+  ],
+  "languages": [
+    {
+      "language": "de",
+      "fluency": "Native Speaker"
+    }
+  ],
+  "interests": [],
+  "references": [],
+  "projects": []
+}

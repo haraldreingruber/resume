@@ -1,0 +1,12 @@
+{
+  "name": "resume",
+  "version": "1.0.0",
+  "main": "resume.json",
+  "repository": "git@github.com:haraldreingruber/resume.git",
+  "author": "Harald Reingruber <harald.reingruber@gmx.at>",
+  "license": "UNLICENSED",
+  "private": true,
+  "devDependencies": {
+    "resume-cli": "^1.2.8"
+  }
+}
