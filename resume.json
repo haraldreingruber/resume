@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json.schemastore.org/resume",
   "basics": {
     "name": "Harald Reingruber",
     "label": "Visual- and Spatial-Computing Crafter and Mob-Programming Advocate",
@@ -31,7 +30,6 @@
   "work": [
     {
       "name": "Self Employed",
-      "endDate": "",
       "highlights": [],
       "position": "Mob-Programming on Open Source Software Meetup Organizer",
       "startDate": "2020-05-31",
@@ -109,7 +107,7 @@
       "url": "",
       "startDate": "2014-02-28",
       "endDate": "2017-02-28",
-      "summary": null,
+      "summary": "",
       "highlights": []
     },
     {
