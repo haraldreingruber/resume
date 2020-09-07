@@ -6,7 +6,13 @@
   "author": "Harald Reingruber <harald.reingruber@gmx.at>",
   "license": "UNLICENSED",
   "private": true,
+  "scripts": {
+    "start": "resume serve --theme kwan",
+    "test": "resume test",
+    "build": "resume export resume.pdf --theme kwan --format pdf"
+  },
   "devDependencies": {
+    "jsonresume-theme-kwan": "0.0.2",
     "resume-cli": "^1.2.8"
   }
 }
