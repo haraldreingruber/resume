@@ -36,6 +36,8 @@
 % (run `cargo gen latex` after editing the YAML). The hooks below map its data
 % macros onto AltaCV; this file only decides layout and styling.
 \newcommand{\ResumeInfo}[2]{\csname #1\endcsname{#2}}
+% Between contact details (email, location) and online profiles.
+\newcommand{\ResumeInfoBreak}{\newline}
 \newcommand{\ResumeEntry}[5]{\cvevent{#1}{#2}{#3}{#4}#5}
 \newcommand{\ResumeEntrySep}{\divider}
 \newcommand{\ResumeHighlights}[1]{\begin{itemize}#1\end{itemize}}

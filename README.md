@@ -3,7 +3,7 @@
 
 **Medical 3D Visualization Expert · Rust & WebAssembly**
 
-Scharnstein, Upper Austria, Austria · [GitHub](https://github.com/haraldreingruber-dedalus) · [LinkedIn](https://www.linkedin.com/in/haraldreingruber)
+Scharnstein, Upper Austria, Austria · [GitHub (haraldreingruber)](https://github.com/haraldreingruber) · [GitHub (haraldreingruber-dedalus)](https://github.com/haraldreingruber-dedalus) · [LinkedIn](https://www.linkedin.com/in/haraldreingruber)
 
 [3D resume](https://haraldreingruber.github.io/resume/) · [PDF](https://haraldreingruber.github.io/resume/Harald_Reingruber_resume.pdf) · [Plain HTML](https://haraldreingruber.github.io/resume/plain.html)
 

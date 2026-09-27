@@ -7,11 +7,17 @@ basics:
   profiles:
     - { network: GitHub, username: jane-doe, url: https://github.com/jane-doe }
   summary: Builds **fast** things -- see [site](https://example.com/a#b) at 100%.
+x-places:
+  vienna: { city: Vienna, countryCode: AT }
+  graz: { city: Graz, countryCode: AT }
 work:
   - x-id: acme
     position: Dev -- Web
     name: Acme
-    location: Vienna, Austria
+    x-place: vienna
+    x-remote: true
+    x-skills: [Rust]
+    x-color: "#005B96"
     startDate: "2020-11"
     highlights:
       - Shipped *C++*/DirectX&nbsp;9 "renderer"
@@ -25,7 +31,7 @@ projects:
   - x-id: thesis
     type: Master's Thesis
     entity: Some University
-    x-location: Graz
+    x-place: graz
     startDate: "2018-10"
     endDate: "2019-07"
     name: A Title

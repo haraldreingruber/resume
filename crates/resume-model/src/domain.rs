@@ -9,6 +9,15 @@ use serde::{Deserialize, Serialize};
 /// project's type and entity.
 pub const DASH_SEPARATOR: &str = " – ";
 
+/// Joins the parts that are present with `separator`; `None` if none are.
+pub(crate) fn join_present<'a>(
+    parts: impl IntoIterator<Item = Option<&'a str>>,
+    separator: &str,
+) -> Option<String> {
+    let parts: Vec<&str> = parts.into_iter().flatten().collect();
+    (!parts.is_empty()).then(|| parts.join(separator))
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Resume {
     pub basics: Basics,
@@ -76,6 +85,8 @@ impl Resume {
             dates: _,
             summary,
             highlights,
+            skills,
+            accent: _,
         } in work
         {
             text.push_str(position);
@@ -83,6 +94,7 @@ impl Resume {
             text.extend(location.iter().map(String::as_str));
             text.extend(summary.iter().map(RichText::plain));
             text.extend(highlights.iter().map(RichText::plain));
+            text.extend(skills.iter().map(String::as_str));
         }
 
         for Project {
@@ -93,6 +105,8 @@ impl Resume {
             description,
             location,
             dates: _,
+            skills,
+            accent: _,
         } in projects
         {
             text.extend(kind.iter().map(String::as_str));
@@ -100,6 +114,7 @@ impl Resume {
             text.push_str(title);
             text.extend(description.iter().map(RichText::plain));
             text.extend(location.iter().map(String::as_str));
+            text.extend(skills.iter().map(String::as_str));
         }
 
         for SkillGroup {
@@ -120,6 +135,7 @@ impl Resume {
             location,
             dates: _,
             courses,
+            accent: _,
         } in education
         {
             text.extend(study_type.iter().map(String::as_str));
@@ -149,11 +165,26 @@ pub struct Basics {
 }
 
 impl Basics {
-    /// Case-insensitive lookup by network name, e.g. `"github"`.
-    pub fn profile(&self, network: &str) -> Option<&Profile> {
+    /// Profiles with a display label: the network name, plus the username
+    /// when several profiles share a network ("GitHub (haraldreingruber)").
+    pub fn labeled_profiles(&self) -> Vec<(String, &Profile)> {
         self.profiles
             .iter()
-            .find(|profile| profile.network.eq_ignore_ascii_case(network))
+            .map(|profile| {
+                let shared = self
+                    .profiles
+                    .iter()
+                    .filter(|other| other.network.eq_ignore_ascii_case(&profile.network))
+                    .count()
+                    > 1;
+                let label = if shared {
+                    format!("{} ({})", profile.network, profile.username)
+                } else {
+                    profile.network.clone()
+                };
+                (label, profile)
+            })
+            .collect()
     }
 }
 
@@ -167,16 +198,12 @@ pub struct Location {
 
 impl fmt::Display for Location {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let parts: Vec<&str> = [
-            Some(&self.city),
-            self.region.as_ref(),
-            self.country.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
-        .map(String::as_str)
-        .collect();
-        f.write_str(&parts.join(", "))
+        let parts = [
+            Some(self.city.as_str()),
+            self.region.as_deref(),
+            self.country.as_deref(),
+        ];
+        f.write_str(&join_present(parts, ", ").unwrap_or_default())
     }
 }
 
@@ -197,6 +224,10 @@ pub struct Work {
     /// Condensed one-paragraph version of the highlights.
     pub summary: Option<RichText>,
     pub highlights: Vec<RichText>,
+    /// Skill keywords (from `Resume::skills`) used in this job.
+    pub skills: Vec<String>,
+    /// Optional accent color (sRGB) for the 3D resume.
+    pub accent: Option<[u8; 3]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -210,20 +241,20 @@ pub struct Project {
     pub description: Option<RichText>,
     pub location: Option<String>,
     pub dates: DateRange,
+    /// Skill keywords (from `Resume::skills`) used in this project.
+    pub skills: Vec<String>,
+    /// Optional accent color (sRGB) for the 3D resume.
+    pub accent: Option<[u8; 3]>,
 }
 
 impl Project {
     /// "Master's Thesis – Austrian Institute of Technology"; falls back to the title.
     pub fn heading(&self) -> String {
-        let parts: Vec<&str> = [self.kind.as_deref(), self.entity.as_deref()]
-            .into_iter()
-            .flatten()
-            .collect();
-        if parts.is_empty() {
-            self.title.clone()
-        } else {
-            parts.join(DASH_SEPARATOR)
-        }
+        join_present(
+            [self.kind.as_deref(), self.entity.as_deref()],
+            DASH_SEPARATOR,
+        )
+        .unwrap_or_else(|| self.title.clone())
     }
 }
 
@@ -245,20 +276,15 @@ pub struct Education {
     pub location: Option<String>,
     pub dates: DateRange,
     pub courses: Vec<String>,
+    /// Optional accent color (sRGB) for the 3D resume.
+    pub accent: Option<[u8; 3]>,
 }
 
 impl Education {
     /// "MSc Computer Science, Visual Computing"; falls back to the institution.
     pub fn title(&self) -> String {
-        let parts: Vec<&str> = [self.study_type.as_deref(), self.area.as_deref()]
-            .into_iter()
-            .flatten()
-            .collect();
-        if parts.is_empty() {
-            self.institution.clone()
-        } else {
-            parts.join(" ")
-        }
+        join_present([self.study_type.as_deref(), self.area.as_deref()], " ")
+            .unwrap_or_else(|| self.institution.clone())
     }
 
     /// "Image processing, real-time graphics." or `None` without courses.
@@ -407,6 +433,46 @@ mod tests {
             end: Some(date(2009, Some(7))),
         };
         assert_eq!(months.to_string(), "02/2009 – 07/2009");
+    }
+
+    #[test]
+    fn labels_repeated_networks_with_the_username() {
+        let profile = |network: &str, username: &str| Profile {
+            network: network.into(),
+            username: username.into(),
+            url: format!("https://example.com/{username}"),
+        };
+        let basics = Basics {
+            name: "A".into(),
+            label: "B".into(),
+            email: "a@b.c".into(),
+            location: Location {
+                city: "X".into(),
+                region: None,
+                country: None,
+            },
+            profiles: vec![
+                profile("GitHub", "me"),
+                profile("GitHub", "me-at-work"),
+                profile("LinkedIn", "me"),
+            ],
+            summary: RichText::default(),
+        };
+        let labels: Vec<String> = basics
+            .labeled_profiles()
+            .into_iter()
+            .map(|(l, _)| l)
+            .collect();
+        assert_eq!(labels, ["GitHub (me)", "GitHub (me-at-work)", "LinkedIn"]);
+    }
+
+    #[test]
+    fn joins_present_parts() {
+        assert_eq!(
+            join_present([Some("a"), None, Some("b")], ", ").as_deref(),
+            Some("a, b")
+        );
+        assert_eq!(join_present([None, None], ", "), None);
     }
 
     #[test]

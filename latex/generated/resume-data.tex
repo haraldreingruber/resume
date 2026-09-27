@@ -2,13 +2,16 @@
 % Regenerate with `cargo gen latex`. Layout and styling live in main.tex, which
 % defines the presentation hooks used below:
 %   \ResumeEntry{title}{organization}{dates}{location}{body}, \ResumeEntrySep,
-%   \ResumeHighlights{items}, \ResumeTag{text}, \ResumeInfo{field}{value}
+%   \ResumeHighlights{items}, \ResumeTag{text}, \ResumeInfo{field}{value},
+%   \ResumeInfoBreak
 
 \newcommand{\ResumeName}{Harald Reingruber}
 \newcommand{\ResumeTagline}{Medical 3D Visualization Expert \textperiodcentered{} Rust \& WebAssembly}
 \newcommand{\ResumePersonalInfo}{%
   \ResumeInfo{email}{harald.reingruber@gmail.com}
   \ResumeInfo{location}{Scharnstein, Upper Austria, Austria}
+  \ResumeInfoBreak
+  \ResumeInfo{github}{haraldreingruber}
   \ResumeInfo{github}{haraldreingruber-dedalus}
   \ResumeInfo{linkedin}{haraldreingruber}
 %
@@ -72,11 +75,11 @@
 }}%
 }
 \newcommand{\ResumeProjects}{%
-\ResumeEntry{Master's Thesis -- Austrian Institute of Technology}{}{10/2009 -- 07/2010}{Vienna}{``An Asynchronous Data Interface for Event-based Stereo Vision Systems'' -- improved 3D reconstruction accuracy through event density-based pixel retention adjustment.}
+\ResumeEntry{Master's Thesis -- Austrian Institute of Technology}{}{10/2009 -- 07/2010}{Vienna, Austria}{``An Asynchronous Data Interface for Event-based Stereo Vision Systems'' -- improved 3D reconstruction accuracy through event density-based pixel retention adjustment.}
 
 \ResumeEntrySep
 
-\ResumeEntry{Final Year Project -- Computer Vision Center}{}{02/2009 -- 07/2009}{Barcelona}{``Intestinal Content Detection in Capsule Endoscopy using Robust Features'' -- developed an SVM detector achieving 71\% accuracy for clinical image analysis.}%
+\ResumeEntry{Final Year Project -- Computer Vision Center}{}{02/2009 -- 07/2009}{Barcelona, Spain}{``Intestinal Content Detection in Capsule Endoscopy using Robust Features'' -- developed an SVM detector achieving 71\% accuracy for clinical image analysis.}%
 }
 \newcommand{\ResumeEducation}{%
 \ResumeEntry{MSc Computer Science, Visual Computing}{Vienna University of Technology}{2007 -- 2011}{Vienna, Austria}{Image processing, real-time graphics, machine learning, pattern recognition, computer vision, augmented reality.}

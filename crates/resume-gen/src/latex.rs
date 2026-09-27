@@ -43,7 +43,8 @@ const HEADER: &str = "\
 % Regenerate with `cargo gen latex`. Layout and styling live in main.tex, which
 % defines the presentation hooks used below:
 %   \\ResumeEntry{title}{organization}{dates}{location}{body}, \\ResumeEntrySep,
-%   \\ResumeHighlights{items}, \\ResumeTag{text}, \\ResumeInfo{field}{value}
+%   \\ResumeHighlights{items}, \\ResumeTag{text}, \\ResumeInfo{field}{value},
+%   \\ResumeInfoBreak
 ";
 
 pub fn render(resume: &Resume) -> anyhow::Result<String> {
@@ -68,20 +69,22 @@ pub fn render(resume: &Resume) -> anyhow::Result<String> {
 
     // Contact details go through AltaCV's detokenizing info fields, so they
     // are emitted verbatim (the loader rejects LaTeX special characters).
+    let info_field = |field: &str, value: &str| format!("  \\ResumeInfo{{{field}}}{{{value}}}");
     let mut info = vec![
-        ("email".to_owned(), basics.email.clone()),
-        ("location".to_owned(), basics.location.to_string()),
+        info_field("email", &basics.email),
+        info_field("location", &basics.location.to_string()),
     ];
+    // \ResumeInfoBreak separates contact details from online profiles; main.tex
+    // decides whether that is a line break.
+    if !basics.profiles.is_empty() {
+        info.push("  \\ResumeInfoBreak".to_owned());
+    }
     info.extend(
         basics
             .profiles
             .iter()
-            .map(|profile| (profile.network.to_lowercase(), profile.username.clone())),
+            .map(|profile| info_field(&profile.network.to_lowercase(), &profile.username)),
     );
-    let info: Vec<String> = info
-        .iter()
-        .map(|(field, value)| format!("  \\ResumeInfo{{{field}}}{{{value}}}"))
-        .collect();
     // The trailing newline keeps the space after the last field, as hand-written.
     define_block(
         &mut out,
