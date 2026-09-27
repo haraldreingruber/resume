@@ -8,3 +8,8 @@
 *.toc
 pdfa.xmpi
 .vscode/.history
+
+# Rust / web builds
+/target
+3d-resume/dist/
+site/

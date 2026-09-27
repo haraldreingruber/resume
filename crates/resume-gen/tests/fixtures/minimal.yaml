@@ -1,0 +1,44 @@
+# Golden-test fixture: exercises every LaTeX code path of resume-gen.
+basics:
+  name: Jane Doe
+  label: Engineer · Rust & C#
+  email: jane_doe@example.com
+  location: { city: Vienna, countryCode: AT }
+  profiles:
+    - { network: GitHub, username: jane-doe, url: https://github.com/jane-doe }
+  summary: Builds **fast** things -- see [site](https://example.com/a#b) at 100%.
+work:
+  - x-id: acme
+    position: Dev -- Web
+    name: Acme
+    location: Vienna, Austria
+    startDate: "2020-11"
+    highlights:
+      - Shipped *C++*/DirectX&nbsp;9 "renderer"
+      - Cut costs by 50%
+  - x-id: old
+    position: Intern
+    name: Old Co
+    startDate: "2019"
+    endDate: "2019"
+projects:
+  - x-id: thesis
+    type: Master's Thesis
+    entity: Some University
+    x-location: Graz
+    startDate: "2018-10"
+    endDate: "2019-07"
+    name: A Title
+    description: improved things.
+skills:
+  - { x-id: code, name: Code & Stuff, keywords: [Rust, C#] }
+education:
+  - x-id: msc
+    studyType: MSc
+    area: Computer Science
+    institution: TU Wien
+    startDate: "2015"
+    endDate: "2019"
+    courses: [Graphics, vision]
+languages:
+  - { language: German, fluency: Native }

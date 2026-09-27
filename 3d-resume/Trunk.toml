@@ -1,0 +1,11 @@
+[build]
+target = "web/index.html"
+dist = "dist"
+# GitHub Pages serves the site under /resume/; override locally with
+# `trunk serve --public-url /`.
+public_url = "/resume/"
+
+[serve]
+# Local dev server at the root path.
+addresses = ["127.0.0.1"]
+port = 8080

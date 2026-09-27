@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harald Reingruber – 3D Resume</title>
+<meta name="description" content="Resume of Harald Reingruber, rendered in 3D with Rust, wgpu and WebGPU.">
+<script>
+  // Browsers without WebGPU get the plain HTML resume (generated from the same data).
+  (async () => {
+    const plain = "plain.html?no-webgpu";
+    if (new URLSearchParams(location.search).has("plain")) return location.replace("plain.html");
+    if (!("gpu" in navigator)) return location.replace(plain);
+    try {
+      if (!(await navigator.gpu.requestAdapter())) location.replace(plain);
+    } catch {
+      location.replace(plain);
+    }
+  })();
+</script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #02060b; }
+  canvas#app { display: block; width: 100vw; height: 100vh; height: 100dvh; outline: none; touch-action: none; }
+  nav {
+    position: fixed; right: 16px; bottom: 16px; display: flex; gap: 8px;
+    font: 600 14px/1 "Lato", "Segoe UI", system-ui, sans-serif;
+  }
+  nav a {
+    padding: 9px 14px; border: 1px solid #3e5a73; border-radius: 999px;
+    color: #c9d4de; background: rgba(2, 6, 11, 0.6); text-decoration: none;
+  }
+  nav a:hover, nav a:focus-visible { border-color: #6db3e8; color: #fff; }
+  .skip { position: absolute; left: -9999px; }
+  .skip:focus { left: 16px; top: 16px; color: #fff; }
+</style>
+<!-- wasm-opt needs the wasm features rustc enables by default. -->
+<link data-trunk rel="rust" href="../Cargo.toml" data-bin="resume-3d" data-wasm-opt="z"
+      data-wasm-opt-params="--enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-reference-types --enable-multivalue" />
+<link data-trunk rel="copy-file" href="plain.html" />
+</head>
+<body>
+<a class="skip" href="plain.html">Skip to the text version of this resume</a>
+<noscript><p style="color:#fff">This 3D resume needs JavaScript and WebGPU. Read the <a href="plain.html" style="color:#6db3e8">text version</a>.</p></noscript>
+<canvas id="app" aria-label="3D resume timeline. Scroll or use the arrow keys to move through time. A text version is linked below."></canvas>
+<nav aria-label="Other formats">
+  <a href="plain.html">Text version</a>
+  <a href="Harald_Reingruber_resume.pdf">PDF</a>
+</nav>
+</body>
+</html>

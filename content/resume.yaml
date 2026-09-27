@@ -1,0 +1,255 @@
+# yaml-language-server: $schema=./resume.schema.json
+#
+# Single source of truth for the resume. Follows the JSON Resume schema
+# (https://jsonresume.org/schema) plus `x-` extension fields.
+#
+# After editing run `cargo gen all` to regenerate the LaTeX data, README.md and
+# the plain HTML page (`cargo gen check` verifies they are up to date).
+#
+# Text conventions:
+# - Write plain Unicode, never LaTeX (`&`, `#`, `%`, `ò` are fine as-is).
+# - `--` becomes an en dash, `---` an em dash.
+# - Prose fields (summary, highlights, description) accept inline Markdown:
+#   **bold**, *emphasis*, [links](https://…), `code`, and &nbsp; for a
+#   non-breaking space. "Quotes" and apostrophes become typographic.
+
+basics:
+  name: Harald Reingruber
+  label: Medical 3D Visualization Expert · Rust & WebAssembly
+  email: harald.reingruber@gmail.com
+  location:
+    city: Scharnstein
+    region: Upper Austria
+    countryCode: AT
+  profiles:
+    - network: GitHub
+      username: haraldreingruber-dedalus
+      url: https://github.com/haraldreingruber-dedalus
+    - network: LinkedIn
+      username: haraldreingruber
+      url: https://www.linkedin.com/in/haraldreingruber
+  summary: >-
+    Specialist in medical 3D visualization, real-time graphics, and augmented
+    reality, with 15+ years spanning medical imaging, AR/VR SDKs, and web-based
+    3D streaming -- currently leading a Rust/WebAssembly modernization of a
+    legacy C++ visualization engine. Pragmatic about trade-offs, balancing
+    product delivery with long-term quality and maintainability through clean
+    code, TDD, and continuous improvement.
+
+work:
+  - x-id: dedalus
+    position: Medical 3D Visualization Expert
+    name: Dedalus HealthCare DACH
+    location: Scharnstein, Austria (Remote)
+    startDate: "2020-11"
+    summary: >-
+      Migrated the medical 3D visualization module from C++/DirectX 9 to Rust +
+      WebAssembly + WebGL/OpenGL and TypeScript. Repackaged it as a
+      framework-agnostic Web Component that ships in two host products (Angular
+      and React). Built a side-by-side comparison system to validate
+      performance and visuals during the migration, and added component-level
+      E2E tests with Storybook and Playwright.
+    highlights:
+      - >-
+        Led the technical transformation of Dedalus' medical 3D visualization
+        module: evaluated technology options and migrated a legacy
+        C++/DirectX&nbsp;9 codebase to Rust + WebAssembly + WebGL/OpenGL and
+        TypeScript
+      - >-
+        Repackaged the module as a framework-agnostic Web Component, now
+        shipping in production in two host products (Angular- and React-based)
+      - >-
+        Engineered a side-by-side comparison system enabling precise
+        performance and visual validation during the migration
+      - >-
+        Established a component-level E2E testing layer with Storybook and
+        Playwright, replacing cumbersome end-to-end tests in host applications
+
+  - x-id: mob-tour
+    position: Pair & Mob-Programming Tour (Apprenticeship)
+    name: Self-employed
+    location: Remote (Worldwide)
+    startDate: "2019-11"
+    endDate: "2020-05"
+    summary: >-
+      Practiced TDD and pair/mob programming with 9 teams in 4 countries.
+      Co-organized the Mob-Programming on Open Source Software meetup in
+      Austria.
+    highlights:
+      - >-
+        Practiced TDD and pair/mob programming with 9 teams across 4 countries
+        (USA, France, Austria, Romania) -- fully remote due to COVID-19 -- in a
+        wide range of languages and environments
+      - Co-organized the Mob-Programming on Open Source Software meetup in Austria
+
+  - x-id: three10
+    position: Software Engineer -- Unity 3D/Node.js/React/TypeScript
+    name: three10
+    location: Vienna, Austria
+    startDate: "2016-09"
+    endDate: "2019-10"
+    summary: >-
+      One of two principal engineers in a team of 6. Built a JavaScript library
+      that streams server-side Unity 3D graphics to the browser over a
+      low-latency video codec. Owned the Docker/Node.js/React backend
+      architecture and secure file transfer.
+    highlights:
+      - >-
+        One of two principal engineers (team of 6); owned secure communication
+        and file transfer between the Unity 3D application and the on-premise
+        backend, plus the Docker/TypeScript/React/Node.js backend architecture
+      - >-
+        Built a JavaScript library for real-time streaming of server-side
+        Unity 3D graphics to an HTML5 browser via a low-latency video codec
+      - >-
+        Implemented HTML5 Server-Sent-Events for backend-to-client data updates
+        (C# client, Node.js server)
+      - >-
+        Built the Docker deployment pipeline for the on-premise backend and
+        implemented network screen capture/streaming
+
+  - x-id: viewar
+    position: Software Engineer, Augmented Reality (C++/Objective-C/JavaScript)
+    name: ViewAR
+    location: Vienna, Austria
+    startDate: "2015-04"
+    endDate: "2016-08"
+    summary: >-
+      Extended the C++ AR core and integrated third-party AR/VR SDKs. Generated
+      watertight meshes and volume estimates from depth-sensor scans for a
+      Lufthansa Cargo pallet-volume system. Cross-compiled the core to WebGL
+      with Emscripten/WebAssembly.
+    highlights:
+      - >-
+        Principal engineer on the C++ team; extended the ViewAR core module and
+        integrated third-party AR/VR SDKs
+      - >-
+        Computed watertight 3D triangle meshes from depth-sensor scans and an
+        algorithm to derive scanned object volume (used in a Lufthansa Cargo
+        pallet-volume system)
+      - Cross-compiled the ViewAR C++ core to JavaScript/WebGL using Emscripten/WebAssembly
+      - Added video texture decoding support
+
+  - x-id: agfa-volume-rendering
+    position: 3D Volume Rendering Engineer (C++)
+    name: Agfa HealthCare
+    location: Vienna, Austria
+    startDate: "2013-10"
+    endDate: "2015-04"
+    summary: >-
+      Main engineer for the GPU/CPU volume rendering engine, including
+      SIMD-optimized CPU rendering. Implemented bi-cubic filtering for WebGL
+      resampling and replaced per-platform build scripts with CMake.
+    highlights:
+      - >-
+        Main engineer for Agfa's GPU/CPU volume rendering engine (team of 8
+        across Austria, Belgium, Canada), with SIMD-optimized CPU rendering
+      - >-
+        Implemented bi-cubic filtering to improve WebGL low-resolution image
+        resampling quality
+      - Built a CMake build system, replacing separate per-platform build scripts
+
+  - x-id: agfa-3d-visualization
+    position: Software Engineer, 3D Visualization (Java)
+    name: Agfa HealthCare
+    location: Vienna, Austria
+    startDate: "2010-09"
+    endDate: "2013-09"
+    summary: >-
+      Implemented 3D visualization and volume data loading features, including
+      progressive loading of volume image data (patent granted).
+    highlights:
+      - >-
+        Implemented and maintained 3D visualization and volume image data
+        loading features (team of 22)
+      - Implemented progressive loading of volume image data (patent granted)
+      - >-
+        Built normal-plane visualization for the unfolded blood vessel view and
+        improved 2D annotation intersection rendering
+
+projects:
+  - x-id: masters-thesis
+    type: Master's Thesis
+    entity: Austrian Institute of Technology
+    x-location: Vienna
+    startDate: "2009-10"
+    endDate: "2010-07"
+    name: An Asynchronous Data Interface for Event-based Stereo Vision Systems
+    description: >-
+      improved 3D reconstruction accuracy through event density-based pixel
+      retention adjustment.
+
+  - x-id: final-year-project
+    type: Final Year Project
+    entity: Computer Vision Center
+    x-location: Barcelona
+    startDate: "2009-02"
+    endDate: "2009-07"
+    name: Intestinal Content Detection in Capsule Endoscopy using Robust Features
+    description: >-
+      developed an SVM detector achieving 71% accuracy for clinical image
+      analysis.
+
+skills:
+  - x-id: programming
+    name: Languages
+    keywords: [Rust, TypeScript/JavaScript, C++, C#, Java]
+  - x-id: graphics
+    name: Graphics & 3D
+    keywords: [WebGL/OpenGL, WebAssembly/Emscripten, Unity 3D]
+  - x-id: imaging
+    name: Imaging & Vision
+    keywords: [OpenCV, SIMD (SSE/AVX/Neon), Image Processing]
+  - x-id: web-tooling
+    name: Web & Tooling
+    keywords: [Node.js, Web Components, Playwright, Storybook, Docker]
+  - x-id: practices
+    name: Engineering Practices
+    keywords:
+      - Unit Testing & TDD
+      - Agile (Scrum/Kanban)
+      - Continuous Improvement
+      - Clean Code
+      - AI-Driven Development (Copilot, Claude Code, OpenSpec)
+
+education:
+  - x-id: msc-tu-wien
+    studyType: MSc
+    area: Computer Science, Visual Computing
+    institution: Vienna University of Technology
+    x-location: Vienna, Austria
+    startDate: "2007"
+    endDate: "2011"
+    courses:
+      - Image processing
+      - real-time graphics
+      - machine learning
+      - pattern recognition
+      - computer vision
+      - augmented reality
+
+  - x-id: exchange-uab
+    studyType: Exchange Program
+    institution: Universitat Autònoma de Barcelona
+    x-location: Barcelona, Spain
+    startDate: "2009"
+    endDate: "2009"
+    courses:
+      - Feature detection (SIFT/SURF)
+      - machine learning
+
+  - x-id: bsc-hagenberg
+    studyType: BSc
+    area: Computer Science, Medical Software Engineering
+    institution: Upper Austria University of Applied Sciences
+    x-location: Hagenberg, Austria
+    startDate: "2005"
+    endDate: "2007"
+
+languages:
+  - language: German
+    fluency: Native
+  - language: English
+    fluency: Fluent
+  - language: Spanish
+    fluency: Conversational

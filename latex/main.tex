@@ -1,0 +1,103 @@
+\documentclass[10pt,a4paper,withhyper]{altacv}
+
+\geometry{left=1.25cm,right=1.25cm,top=1.5cm,bottom=1.5cm,columnsep=1.2cm}
+
+\usepackage{paracol}
+
+% This example is compiled with pdflatex, so use the CTAN roboto/lato
+% packages (already installed alongside this template) rather than fontspec.
+\iftutex
+  \setmainfont{Roboto Slab}
+  \setsansfont{Lato}
+  \renewcommand{\familydefault}{\sfdefault}
+\else
+  \usepackage[rm]{roboto}
+  \usepackage[defaultsans]{lato}
+  \renewcommand{\familydefault}{\sfdefault}
+\fi
+
+\definecolor{SlateGrey}{HTML}{2E2E2E}
+\definecolor{LightGrey}{HTML}{666666}
+\definecolor{DarkPastelRed}{HTML}{03396C}
+\definecolor{PastelRed}{HTML}{005B96}
+\definecolor{GoldenEarth}{HTML}{6497B1}
+\colorlet{name}{black}
+\colorlet{tagline}{PastelRed}
+\colorlet{heading}{DarkPastelRed}
+\colorlet{headingrule}{GoldenEarth}
+\colorlet{subheading}{PastelRed}
+\colorlet{accent}{PastelRed}
+\colorlet{emphasis}{SlateGrey}
+\colorlet{body}{LightGrey}
+
+\renewcommand{\cvItemMarker}{{\small\textbullet}}
+
+% Content comes from ../content/resume.yaml via generated/resume-data.tex
+% (run `cargo gen latex` after editing the YAML). The hooks below map its data
+% macros onto AltaCV; this file only decides layout and styling.
+\newcommand{\ResumeInfo}[2]{\csname #1\endcsname{#2}}
+\newcommand{\ResumeEntry}[5]{\cvevent{#1}{#2}{#3}{#4}#5}
+\newcommand{\ResumeEntrySep}{\divider}
+\newcommand{\ResumeHighlights}[1]{\begin{itemize}#1\end{itemize}}
+\newcommand{\ResumeTag}[1]{\cvtag{#1}}
+% Skill groups are placed by their x-id from the YAML.
+\newcommand{\ResumeSkillGroup}[1]{{\small\textbf{\ResumeSkillName{#1}}}\smallskip\par\ResumeSkillTags{#1}}
+\input{generated/resume-data}
+
+\begin{document}
+\name{\ResumeName}
+\tagline{\ResumeTagline}
+\personalinfo{\ResumePersonalInfo}
+
+\makecvheader
+
+\columnratio{0.65}
+
+\begin{paracol}{2}
+
+\cvsection{Summary}
+\ResumeSummary
+
+\cvsection{Experience}
+
+\ResumeExperience
+
+\cvsection{Selected Projects \& Research}
+
+\ResumeProjects
+
+\switchcolumn
+
+\cvsection{Technical Skills}
+
+\ResumeSkillGroup{programming}
+
+\divider\smallskip
+
+\ResumeSkillGroup{graphics}
+
+\divider\smallskip
+
+\ResumeSkillGroup{imaging}
+
+\divider\smallskip
+
+\ResumeSkillGroup{web-tooling}
+
+\medskip
+
+\cvsection{\ResumeSkillName{practices}}
+\begin{itemize}
+\ResumeSkillItems{practices}
+\end{itemize}
+
+\cvsection{Education}
+
+\ResumeEducation
+
+\cvsection{Languages}
+\ResumeLanguages
+
+\end{paracol}
+
+\end{document}

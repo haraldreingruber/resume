@@ -1,0 +1,57 @@
+name: Native
+
+# Reusable: tests the workspace and builds the native 3D resume (release
+# profile) on Linux, Windows and macOS, uploading one archive per platform.
+# Called by ci.yml (every PR and push to master) and release.yml (tags), so
+# releases ship exactly what CI tested.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            os: ubuntu-latest
+            archive: resume-3d-linux-x86_64.tar.gz
+          - name: Windows x86_64
+            os: windows-latest
+            archive: resume-3d-windows-x86_64.zip
+          - name: macOS arm64
+            os: macos-latest
+            archive: resume-3d-macos-arm64.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - run: cargo build -p resume-3d --release
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "Binary size (${{ matrix.name }}): $((Get-Item target/release/resume-3d.exe).Length) bytes" >> $env:GITHUB_STEP_SUMMARY
+          Compress-Archive -Path target/release/resume-3d.exe -DestinationPath ${{ matrix.archive }}
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          echo "Binary size (${{ matrix.name }}): $(wc -c < target/release/resume-3d) bytes" >> "$GITHUB_STEP_SUMMARY"
+          tar -czf ${{ matrix.archive }} -C target/release resume-3d
+      # Uploaded as-is: GitHub would otherwise wrap the archive in another zip
+      # (and zipping drops the executable bit, which the tar.gz keeps). The
+      # artifact is named after the file.
+      - uses: actions/upload-artifact@v7
+        with:
+          path: ${{ matrix.archive }}
+          archive: false

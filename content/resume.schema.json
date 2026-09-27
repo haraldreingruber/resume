@@ -1,0 +1,350 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Source",
+  "description": "Resume content, following the JSON Resume schema plus `x-` extension fields.",
+  "type": "object",
+  "properties": {
+    "basics": {
+      "$ref": "#/definitions/Basics"
+    },
+    "education": {
+      "description": "Education, most recent first.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Education"
+      }
+    },
+    "languages": {
+      "description": "Spoken languages.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Language"
+      }
+    },
+    "projects": {
+      "description": "Selected projects and research, most recent first.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Project"
+      }
+    },
+    "skills": {
+      "description": "Skill groups; each group's keywords are rendered as tags.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Skill"
+      }
+    },
+    "work": {
+      "description": "Work experience, most recent first.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Work"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "basics"
+  ],
+  "definitions": {
+    "Basics": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "label": {
+          "description": "Tagline shown below the name.",
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/definitions/Location"
+        },
+        "name": {
+          "type": "string"
+        },
+        "profiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Profile"
+          }
+        },
+        "summary": {
+          "description": "Short professional summary (inline Markdown).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "label",
+        "email",
+        "location",
+        "summary"
+      ]
+    },
+    "Education": {
+      "type": "object",
+      "properties": {
+        "area": {
+          "description": "Field of study, e.g. `Computer Science, Visual Computing`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "courses": {
+          "description": "Focus topics; rendered as one sentence.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "endDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^\\d{4}(-\\d{2}(-\\d{2})?)?$"
+        },
+        "institution": {
+          "type": "string"
+        },
+        "startDate": {
+          "type": "string",
+          "pattern": "^\\d{4}(-\\d{2}(-\\d{2})?)?$"
+        },
+        "studyType": {
+          "description": "Degree, e.g. `MSc`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "x-id": {
+          "description": "Stable id, unique across the whole resume.",
+          "type": "string"
+        },
+        "x-location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "x-id",
+        "institution",
+        "startDate"
+      ]
+    },
+    "Language": {
+      "type": "object",
+      "properties": {
+        "fluency": {
+          "description": "E.g. `Native`, `Fluent`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "language": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "language"
+      ]
+    },
+    "Location": {
+      "type": "object",
+      "properties": {
+        "city": {
+          "type": "string"
+        },
+        "countryCode": {
+          "description": "ISO 3166-1 alpha-2 code, e.g. `AT`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z]{2}$"
+        },
+        "region": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "city"
+      ]
+    },
+    "Profile": {
+      "type": "object",
+      "properties": {
+        "network": {
+          "description": "E.g. `GitHub`, `LinkedIn`.",
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "network",
+        "username",
+        "url"
+      ]
+    },
+    "Project": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "What was achieved (inline Markdown).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^\\d{4}(-\\d{2}(-\\d{2})?)?$"
+        },
+        "entity": {
+          "description": "Organization the project was done at.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Project or thesis title.",
+          "type": "string"
+        },
+        "startDate": {
+          "type": "string",
+          "pattern": "^\\d{4}(-\\d{2}(-\\d{2})?)?$"
+        },
+        "type": {
+          "description": "Kind of project, e.g. `Master's Thesis`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "x-id": {
+          "description": "Stable id, unique across the whole resume.",
+          "type": "string"
+        },
+        "x-location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "x-id",
+        "name",
+        "startDate"
+      ]
+    },
+    "Skill": {
+      "type": "object",
+      "properties": {
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "description": "Group heading, e.g. `Languages`.",
+          "type": "string"
+        },
+        "x-id": {
+          "description": "Stable id, unique across the whole resume. Referenced from\n`latex/main.tex` to place the group.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "x-id",
+        "name",
+        "keywords"
+      ]
+    },
+    "Work": {
+      "type": "object",
+      "properties": {
+        "endDate": {
+          "description": "Omit for the current position.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^\\d{4}(-\\d{2}(-\\d{2})?)?$"
+        },
+        "highlights": {
+          "description": "Bullet points (inline Markdown each).",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Company name.",
+          "type": "string"
+        },
+        "position": {
+          "description": "Job title.",
+          "type": "string"
+        },
+        "startDate": {
+          "type": "string",
+          "pattern": "^\\d{4}(-\\d{2}(-\\d{2})?)?$"
+        },
+        "summary": {
+          "description": "Condensed one-paragraph version of the highlights (inline Markdown).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "x-id": {
+          "description": "Stable id, unique across the whole resume. Not currently referenced by\nany renderer (the 3D app's `?station=N` deep link is a numeric index\ninto `work`, not this id) -- reordering `work` changes what a saved\ndeep link points to.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "x-id",
+        "position",
+        "name",
+        "startDate"
+      ]
+    }
+  }
+}

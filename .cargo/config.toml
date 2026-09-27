@@ -1,0 +1,4 @@
+[alias]
+# Regenerate (or check) everything derived from content/resume.yaml:
+#   cargo gen all | latex | readme | html | schema     cargo gen check
+gen = "run -q -p resume-gen --"

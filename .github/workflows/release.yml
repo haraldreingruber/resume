@@ -1,0 +1,55 @@
+name: Release
+
+# Push a tag like `v0.1.0` to test and build the native apps (via the shared
+# native.yml, same as CI) and attach them, plus the PDF, to a GitHub Release.
+# The binaries are unsigned, so Windows SmartScreen and macOS Gatekeeper will
+# warn on first launch.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  native:
+    name: Native
+    uses: ./.github/workflows/native.yml
+
+  latex:
+    name: PDF
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: xu-cheng/latex-action@v4
+        with:
+          working_directory: latex
+          root_file: main.tex
+          args: -pdf -file-line-error -halt-on-error -interaction=nonstopmode -jobname=Harald_Reingruber_resume
+      # Uploaded as-is (no zip wrapper); the artifact is named after the file.
+      - uses: actions/upload-artifact@v7
+        with:
+          path: latex/Harald_Reingruber_resume.pdf
+          archive: false
+
+  release:
+    name: GitHub Release
+    needs: [native, latex]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # All artifacts here were uploaded without a zip wrapper; skip-decompress
+      # keeps the Windows .zip from being extracted, so it's attached as-is.
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+          skip-decompress: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true

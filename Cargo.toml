@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/resume-model", "crates/resume-gen", "3d-resume"]
+
+[workspace.package]
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+resume-model = { path = "crates/resume-model" }
+
+# Tuned for small binaries: the native app and the wasm bundle.
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Build scripts bake the MSDF font atlas; optimize them so builds stay fast.
+[profile.dev.build-override]
+opt-level = 3
+
+[profile.release.build-override]
+opt-level = 3

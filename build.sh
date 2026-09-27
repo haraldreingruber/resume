@@ -1,1 +1,0 @@
-pdflatex -interaction=nonstopmode -halt-on-error main.tex
