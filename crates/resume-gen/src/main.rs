@@ -26,6 +26,15 @@ struct Output {
     render: fn(&Resume) -> anyhow::Result<String>,
 }
 
+impl Output {
+    /// Renders with LF line endings: on Windows, Git may check the templates
+    /// out with CRLF, which would otherwise end up in the output.
+    fn render_lf(&self, resume: &Resume) -> anyhow::Result<String> {
+        let content = (self.render)(resume).with_context(|| format!("rendering {}", self.name))?;
+        Ok(content.replace("\r\n", "\n"))
+    }
+}
+
 const OUTPUTS: &[Output] = &[
     Output {
         name: "latex",
@@ -97,7 +106,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn write(root: &Path, output: &Output, resume: &Resume) -> anyhow::Result<()> {
-    let content = (output.render)(resume).with_context(|| format!("rendering {}", output.name))?;
+    let content = output.render_lf(resume)?;
     let path = root.join(output.path);
     if read_normalized(&path).as_deref() == Some(content.as_str()) {
         println!("unchanged {}", output.path);
@@ -114,7 +123,7 @@ fn write(root: &Path, output: &Output, resume: &Resume) -> anyhow::Result<()> {
 fn check(root: &Path, resume: &Resume, errors: &[String]) -> anyhow::Result<ExitCode> {
     let mut stale = Vec::new();
     for output in OUTPUTS {
-        let expected = (output.render)(resume)?;
+        let expected = output.render_lf(resume)?;
         if read_normalized(&root.join(output.path)).as_deref() != Some(expected.as_str()) {
             stale.push(output.path);
         }
