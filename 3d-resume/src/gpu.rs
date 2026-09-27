@@ -6,15 +6,21 @@ use winit::dpi::PhysicalSize;
 use winit::event_loop::OwnedDisplayHandle;
 use winit::window::Window;
 
+/// What the renderer needs: the device, its queue and the color format it
+/// draws in. Shared by the window surface and headless screenshots.
+pub struct Context {
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    /// sRGB format of the render target: shaders output linear colors.
+    pub view_format: wgpu::TextureFormat,
+}
+
 pub struct Gpu {
     instance: wgpu::Instance,
     window: Arc<Window>,
-    pub surface: wgpu::Surface<'static>,
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
+    surface: wgpu::Surface<'static>,
+    pub context: Context,
     pub config: wgpu::SurfaceConfiguration,
-    /// sRGB view of the surface format: shaders output linear colors.
-    pub view_format: wgpu::TextureFormat,
 }
 
 impl Gpu {
@@ -60,10 +66,12 @@ impl Gpu {
             instance,
             window,
             surface,
-            device,
-            queue,
+            context: Context {
+                device,
+                queue,
+                view_format,
+            },
             config,
-            view_format,
         };
         gpu.configure();
         Ok(gpu)
@@ -74,18 +82,35 @@ impl Gpu {
     }
 
     pub fn resize(&mut self, size: PhysicalSize<u32>) {
-        let max = self.device.limits().max_texture_dimension_2d;
+        let max = self.context.device.limits().max_texture_dimension_2d;
         self.config.width = size.width.clamp(1, max);
         self.config.height = size.height.clamp(1, max);
         self.configure();
     }
 
     fn configure(&self) {
-        self.surface.configure(&self.device, &self.config);
+        self.surface.configure(&self.context.device, &self.config);
+    }
+
+    /// Draws a frame with `draw` and presents it. Returns `false` if the
+    /// surface skipped this frame (the caller should request another redraw
+    /// so the skipped frame isn't the last one).
+    pub fn render(&mut self, draw: impl FnOnce(&Context, &wgpu::TextureView)) -> bool {
+        let Some(frame) = self.acquire() else {
+            return false;
+        };
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.context.view_format),
+            ..Default::default()
+        });
+        draw(&self.context, &view);
+        self.window.pre_present_notify();
+        self.context.queue.present(frame);
+        true
     }
 
     /// The next frame to draw into, or `None` to skip this frame.
-    pub fn acquire(&mut self) -> Option<wgpu::SurfaceTexture> {
+    fn acquire(&mut self) -> Option<wgpu::SurfaceTexture> {
         match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => Some(texture),
             wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Timeout => None,
@@ -113,10 +138,5 @@ impl Gpu {
                 None
             }
         }
-    }
-
-    pub fn present(&self, frame: wgpu::SurfaceTexture) {
-        self.window.pre_present_notify();
-        self.queue.present(frame);
     }
 }

@@ -11,12 +11,17 @@ struct Globals {
 }
 
 struct Groups {
-    // x: hover highlight (0..1) per group; group 0 is never highlighted.
-    highlight: array<vec4<f32>, 64>,
+    // Per group (group 0 is never highlighted): x = highlight (0..1),
+    // y = keyboard focus (shows the group's focus rings).
+    state: array<vec4<f32>, 64>,
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(3) var<uniform> groups: Groups;
+
+// A shape whose group has this bit set is a focus ring: drawn only while its
+// group has keyboard focus. Matches `shapes::FOCUS_RING`.
+const FOCUS_RING: u32 = 0x80000000u;
 
 struct Shape {
     // x0, y0 (bottom), x1, y1 (top).
@@ -49,12 +54,16 @@ fn vs_main(@builtin(vertex_index) index: u32, shape: Shape) -> VertexOutput {
     let local = (corner * 2.0 - 1.0) * (half_size + pad);
     let world = vec3<f32>(center + local, shape.z);
 
-    let highlight = groups.highlight[min(shape.group, 63u)].x;
+    let state = groups.state[min(shape.group & ~FOCUS_RING, 63u)];
+    var alpha = shape.color.a;
+    if (shape.group & FOCUS_RING) != 0u {
+        alpha *= state.y;
+    }
     var out: VertexOutput;
     out.clip = globals.view_proj * vec4<f32>(world, 1.0);
     out.local = local;
     out.half_size = half_size;
-    out.color = vec4<f32>(mix(shape.color.rgb, vec3<f32>(1.0), highlight * 0.35), shape.color.a);
+    out.color = vec4<f32>(mix(shape.color.rgb, vec3<f32>(1.0), state.x * 0.35), alpha);
     out.world = world;
     out.style = vec2<f32>(min(shape.radius, min(half_size.x, half_size.y)), shape.border);
     return out;

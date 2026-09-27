@@ -1,6 +1,6 @@
 //! winit application: creates the window, initializes the GPU (async on the
-//! web), turns input into timeline movement and link clicks, and renders on
-//! demand.
+//! web), turns input into timeline movement, link clicks and keyboard focus,
+//! and renders on demand.
 
 use std::sync::Arc;
 
@@ -12,14 +12,15 @@ use winit::event::{
     ElementState, KeyEvent, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
 };
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
-use winit::keyboard::{Key, NamedKey};
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{CursorIcon, Window, WindowId};
 
+use crate::focus::{self, Step};
 use crate::gpu::Gpu;
 use crate::renderer::Renderer;
-use crate::scene::{Action, Lens, Scene};
+use crate::scene::{Lens, Scene};
 use crate::timeline::Timeline;
-use crate::ui::UiLayer;
+use crate::ui::{self, Button, UiLayer};
 
 /// Timeline units per wheel line and per touch/trackpad pixel.
 const SCROLL_PER_LINE: f32 = 0.35;
@@ -46,7 +47,7 @@ pub struct App {
     scene: Scene,
     timeline: Timeline,
     /// Screen-space buttons (native only; the web page has an HTML nav).
-    buttons: Vec<(&'static str, u32)>,
+    buttons: Vec<Button>,
     window: Option<Arc<Window>>,
     state: Option<State>,
     last_frame: Instant,
@@ -55,6 +56,15 @@ pub struct App {
     hovered: Option<u32>,
     pressed: Option<u32>,
     touch: Option<Touch>,
+    /// Hover group with keyboard focus (Tab / Shift+Tab, Enter opens it).
+    focused: Option<u32>,
+    modifiers: ModifiersState,
+    /// The station in view, and the one last shown in the address bar.
+    station: usize,
+    shown_station: usize,
+    /// Whether Tab / Shift+Tab leaves the canvas, read by the page's listener.
+    #[cfg(target_arch = "wasm32")]
+    tab_leaves: std::rc::Rc<std::cell::Cell<[bool; 2]>>,
 }
 
 struct State {
@@ -75,14 +85,7 @@ impl App {
     pub fn new(event_loop: &EventLoop<AppEvent>, options: Options) -> Self {
         let resume = crate::content::resume();
         let mut scene = Scene::new(&resume);
-        let buttons = if cfg!(target_arch = "wasm32") {
-            Vec::new()
-        } else {
-            vec![
-                ("Text version", scene.add_action(Action::TextVersion)),
-                ("PDF", scene.add_action(Action::Pdf)),
-            ]
-        };
+        let buttons = ui::native_buttons(&mut scene);
         let start = options
             .station
             .as_deref()
@@ -90,7 +93,7 @@ impl App {
             .unwrap_or(0);
         let mut timeline = Timeline::starting_at(scene.station_count(), start);
         timeline.set_instant(options.reduced_motion);
-        Self {
+        let app = Self {
             proxy: event_loop.create_proxy(),
             title: format!("{} – 3D Resume", resume.basics.name),
             scene,
@@ -103,7 +106,17 @@ impl App {
             hovered: None,
             pressed: None,
             touch: None,
-        }
+            focused: None,
+            modifiers: ModifiersState::empty(),
+            station: start,
+            shown_station: start,
+            #[cfg(target_arch = "wasm32")]
+            tab_leaves: Default::default(),
+        };
+        #[cfg(target_arch = "wasm32")]
+        crate::web::release_tab_at_edges(app.tab_leaves.clone());
+        app.publish_tab_leaves();
+        app
     }
 
     fn request_redraw(&self) {
@@ -118,26 +131,104 @@ impl App {
         self.last_frame = now;
         let moving = self.timeline.update(dt);
 
-        let Some(state) = &mut self.state else { return };
-        let camera = self.scene.camera(self.timeline.position(), &state.lens);
-        let (width, height) = (
-            state.gpu.config.width as f32,
-            state.gpu.config.height as f32,
-        );
-        let presented =
-            state
-                .renderer
-                .render(&mut state.gpu, &camera, UiLayer::projection(width, height));
+        let Some(State {
+            gpu,
+            renderer,
+            lens,
+            ..
+        }) = &mut self.state
+        else {
+            return;
+        };
+        let camera = self.scene.camera(self.timeline.position(), lens);
+        let projection = UiLayer::projection(gpu.config.width as f32, gpu.config.height as f32);
+        let presented = gpu.render(|ctx, view| renderer.draw(ctx, view, &camera, projection));
         // Keep redrawing while the timeline is animating, and retry a frame
         // the surface skipped (e.g. right after the first `configure()`) so a
         // skipped frame is never the last one drawn.
         if moving || !presented {
             self.request_redraw();
         }
+        self.follow_station(!moving);
         if moving {
             // The link under a resting cursor changes as the camera moves.
             self.update_hover();
         }
+    }
+
+    /// Keeps station-dependent state in step with the timeline: keyboard
+    /// focus stays within the station in view, and once the timeline has
+    /// `settled`, the web address names that station.
+    fn follow_station(&mut self, settled: bool) {
+        let station = self.timeline.nearest();
+        if station != self.station {
+            self.station = station;
+            if self.focused.is_some_and(|g| !self.targets().contains(&g)) {
+                self.set_focus(None);
+            } else {
+                self.publish_tab_leaves();
+            }
+        }
+        if settled && station != self.shown_station {
+            self.shown_station = station;
+            #[cfg(target_arch = "wasm32")]
+            crate::web::show_station(
+                Some(station)
+                    .filter(|&s| s > 0)
+                    .and_then(|s| self.scene.station_id(s)),
+            );
+        }
+    }
+
+    /// Keyboard focus targets: the links of the station in view, then the
+    /// screen-space buttons.
+    fn targets(&self) -> Vec<u32> {
+        focus::targets(&self.scene, self.station, &self.buttons)
+    }
+
+    fn focus_index(&self, targets: &[u32]) -> Option<usize> {
+        let focused = self.focused?;
+        targets.iter().position(|&group| group == focused)
+    }
+
+    /// Tab (`forward`) or Shift+Tab.
+    fn move_focus(&mut self, forward: bool) {
+        let targets = self.targets();
+        let current = self.focus_index(&targets);
+        match focus::step(current, targets.len(), forward, focus::WRAPS) {
+            Step::To(index) => self.set_focus(index.map(|i| targets[i])),
+            // The page's listener normally lets such a Tab through to the
+            // browser before winit sees it.
+            Step::Leave => self.set_focus(None),
+        }
+    }
+
+    fn set_focus(&mut self, group: Option<u32>) {
+        self.focused = group;
+        self.update_groups();
+        self.publish_tab_leaves();
+    }
+
+    /// Tells the page whether the next Tab / Shift+Tab leaves the canvas.
+    fn publish_tab_leaves(&self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let targets = self.targets();
+            let current = self.focus_index(&targets);
+            let leaves =
+                |forward| focus::step(current, targets.len(), forward, focus::WRAPS) == Step::Leave;
+            self.tab_leaves.set([leaves(true), leaves(false)]);
+        }
+    }
+
+    /// Uploads the hovered and focused groups and redraws.
+    fn update_groups(&self) {
+        if let Some(state) = &self.state {
+            state
+                .renderer
+                .set_groups(&state.gpu.context, self.hovered, self.focused);
+        }
+        self.request_redraw();
     }
 
     /// Rebuilds size-dependent state: camera lens and screen-space buttons.
@@ -146,7 +237,7 @@ impl App {
         let Some(state) = &mut self.state else { return };
         state.lens = Scene::lens(state.gpu.aspect());
         state.ui = UiLayer::buttons(state.gpu.config.width as f32, scale, &self.buttons);
-        state.renderer.set_ui(&state.gpu, &state.ui);
+        state.renderer.set_ui(&state.gpu.context, &state.ui);
     }
 
     /// The hover group at a cursor position: screen-space buttons first, then
@@ -171,9 +262,7 @@ impl App {
             return;
         }
         self.hovered = group;
-        if let Some(state) = &self.state {
-            state.renderer.set_highlight(&state.gpu, group);
-        }
+        self.update_groups();
         if let Some(window) = &self.window {
             window.set_cursor(if group.is_some() {
                 CursorIcon::Pointer
@@ -181,7 +270,6 @@ impl App {
                 CursorIcon::Default
             });
         }
-        self.request_redraw();
     }
 
     fn activate(&self, group: u32) {
@@ -195,6 +283,14 @@ impl App {
             return;
         }
         match &event.logical_key {
+            Key::Named(NamedKey::Tab) => return self.move_focus(!self.modifiers.shift_key()),
+            Key::Named(NamedKey::Enter) => {
+                if let Some(group) = self.focused {
+                    self.activate(group);
+                }
+                return;
+            }
+            Key::Named(NamedKey::Escape) => return self.set_focus(None),
             Key::Named(
                 NamedKey::ArrowDown | NamedKey::ArrowRight | NamedKey::PageDown | NamedKey::Space,
             ) => self.timeline.step(1),
@@ -270,7 +366,7 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::GpuReady(Ok(gpu)) => {
-                let renderer = Renderer::new(&gpu, &self.scene);
+                let renderer = Renderer::new(&gpu.context, &self.scene);
                 self.state = Some(State {
                     lens: Scene::lens(gpu.aspect()),
                     ui: UiLayer::default(),
@@ -304,6 +400,9 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::ScaleFactorChanged { .. } => self.layout(),
             WindowEvent::RedrawRequested => self.redraw(),
             WindowEvent::KeyboardInput { event, .. } => self.keyboard(&event),
+            WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
+            // The window lost focus, or on the web, Tab moved on from the canvas.
+            WindowEvent::Focused(false) => self.set_focus(None),
             WindowEvent::MouseWheel { delta, .. } => {
                 let forward = match delta {
                     MouseScrollDelta::LineDelta(_, y) => -y * SCROLL_PER_LINE,

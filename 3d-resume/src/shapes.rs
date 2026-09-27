@@ -4,6 +4,10 @@
 
 use bytemuck::{Pod, Zeroable};
 
+/// Group flag of a focus ring: drawn only while its group has keyboard focus
+/// (see `Renderer::set_groups`). Matches `FOCUS_RING` in `shaders/shapes.wgsl`.
+pub const FOCUS_RING: u32 = 1 << 31;
+
 /// One shape; matches the vertex layout in `shaders/shapes.wgsl`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -49,6 +53,18 @@ impl ShapeInstance {
             radius,
             color,
         )
+    }
+
+    /// An outline shown only while `group` has keyboard focus.
+    pub fn focus_ring(
+        rect: [f32; 4],
+        z: f32,
+        radius: f32,
+        border: f32,
+        color: [f32; 4],
+        group: u32,
+    ) -> Self {
+        Self::outlined(rect, z, radius, border, color).group(group | FOCUS_RING)
     }
 
     pub fn group(mut self, group: u32) -> Self {

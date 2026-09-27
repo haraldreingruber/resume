@@ -1,11 +1,12 @@
 //! Draws a frame: gradient background, the scene's shapes and MSDF glyphs,
-//! then the screen-space layer (native buttons) on top.
+//! then the screen-space layer (native buttons) on top. Draws into any
+//! texture view: the window surface or an offscreen screenshot target.
 
 use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 use wgpu::util::DeviceExt;
 
-use crate::gpu::Gpu;
+use crate::gpu::Context;
 use crate::scene::{Camera, FAR_FADE, MAX_GROUPS, NEAR_FADE, Scene};
 use crate::shapes::ShapeInstance;
 use crate::text::{self, GlyphInstance};
@@ -59,16 +60,16 @@ pub struct Renderer {
     background: wgpu::RenderPipeline,
     text: wgpu::RenderPipeline,
     shapes: wgpu::RenderPipeline,
-    /// Per hover group: `x` = highlight amount.
+    /// Per hover group: `x` = highlight, `y` = keyboard focus (focus ring).
     groups: wgpu::Buffer,
     world: Layer,
     ui: Layer,
 }
 
 impl Renderer {
-    pub fn new(gpu: &Gpu, scene: &Scene) -> Self {
-        let device = &gpu.device;
-        let atlas = atlas_texture(gpu).create_view(&Default::default());
+    pub fn new(ctx: &Context, scene: &Scene) -> Self {
+        let device = &ctx.device;
+        let atlas = atlas_texture(ctx).create_view(&Default::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("atlas"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -76,7 +77,7 @@ impl Renderer {
             ..Default::default()
         });
         let groups = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hover groups"),
+            label: Some("group state"),
             contents: bytemuck::cast_slice(&[[0.0f32; 4]; MAX_GROUPS]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -160,7 +161,7 @@ impl Renderer {
         });
         let text_shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/text.wgsl"));
         let text = instanced_pipeline(
-            gpu,
+            ctx,
             "text",
             &scene_layout,
             &text_shader,
@@ -172,7 +173,7 @@ impl Renderer {
         let shapes_shader =
             device.create_shader_module(wgpu::include_wgsl!("../shaders/shapes.wgsl"));
         let shapes = instanced_pipeline(
-            gpu,
+            ctx,
             "shapes",
             &scene_layout,
             &shapes_shader,
@@ -202,7 +203,7 @@ impl Renderer {
                 module: &background_shader,
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
-                targets: &[Some(gpu.view_format.into())],
+                targets: &[Some(ctx.view_format.into())],
             }),
             primitive: Default::default(),
             depth_stencil: None,
@@ -222,35 +223,36 @@ impl Renderer {
     }
 
     /// Replaces the screen-space layer (e.g. after a resize).
-    pub fn set_ui(&mut self, gpu: &Gpu, ui: &UiLayer) {
-        self.ui.glyphs = Instances::new(&gpu.device, "ui glyphs", &ui.glyphs);
-        self.ui.shapes = Instances::new(&gpu.device, "ui shapes", &ui.shapes);
+    pub fn set_ui(&mut self, ctx: &Context, ui: &UiLayer) {
+        self.ui.glyphs = Instances::new(&ctx.device, "ui glyphs", &ui.glyphs);
+        self.ui.shapes = Instances::new(&ctx.device, "ui shapes", &ui.shapes);
     }
 
-    /// Highlights one hover group (a link or button), or none.
-    pub fn set_highlight(&self, gpu: &Gpu, group: Option<u32>) {
-        let mut highlight = [[0.0f32; 4]; MAX_GROUPS];
-        if let Some(entry) = group
-            .filter(|&g| g != 0)
-            .and_then(|g| highlight.get_mut(g as usize))
-        {
-            entry[0] = 1.0;
+    /// Highlights the hovered and the keyboard-focused group (a link or
+    /// button) and shows the focused one's focus ring.
+    pub fn set_groups(&self, ctx: &Context, hovered: Option<u32>, focused: Option<u32>) {
+        let mut state = [[0.0f32; 4]; MAX_GROUPS];
+        for (group, focus) in [(hovered, 0.0), (focused, 1.0)] {
+            if let Some(entry) = group
+                .filter(|&g| g != 0)
+                .and_then(|g| state.get_mut(g as usize))
+            {
+                entry[0] = 1.0;
+                entry[1] = f32::max(entry[1], focus);
+            }
         }
-        gpu.queue
-            .write_buffer(&self.groups, 0, bytemuck::cast_slice(&highlight));
+        ctx.queue
+            .write_buffer(&self.groups, 0, bytemuck::cast_slice(&state));
     }
 
-    /// Draws a frame; returns `false` if the frame was skipped (the caller
-    /// should request another redraw so the skipped frame isn't the last one).
-    pub fn render(&self, gpu: &mut Gpu, camera: &Camera, ui_projection: Mat4) -> bool {
-        let Some(frame) = gpu.acquire() else {
-            return false;
-        };
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
-            format: Some(gpu.view_format),
-            ..Default::default()
-        });
-
+    /// Draws a frame into `target` (a view in `ctx.view_format`).
+    pub fn draw(
+        &self,
+        ctx: &Context,
+        target: &wgpu::TextureView,
+        camera: &Camera,
+        ui_projection: Mat4,
+    ) {
         let focus = camera.focus_distance;
         let world = Globals {
             view_proj: camera.view_proj.to_cols_array_2d(),
@@ -268,17 +270,17 @@ impl Renderer {
             params: [text::DISTANCE_RANGE_PX, 0.0, 0.0, 0.0],
             ..world
         };
-        gpu.queue
+        ctx.queue
             .write_buffer(&self.world.globals, 0, bytemuck::bytes_of(&world));
-        gpu.queue
+        ctx.queue
             .write_buffer(&self.ui.globals, 0, bytemuck::bytes_of(&ui));
 
-        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        let mut encoder = ctx.device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("frame"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: target,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -302,22 +304,20 @@ impl Renderer {
                 layer.glyphs.draw(&mut pass);
             }
         }
-        gpu.queue.submit([encoder.finish()]);
-        gpu.present(frame);
-        true
+        ctx.queue.submit([encoder.finish()]);
     }
 }
 
 /// A pipeline drawing one premultiplied-alpha quad (triangle strip) per instance.
 fn instanced_pipeline(
-    gpu: &Gpu,
+    ctx: &Context,
     label: &str,
     layout: &wgpu::PipelineLayout,
     shader: &wgpu::ShaderModule,
     stride: usize,
     attributes: &[wgpu::VertexAttribute],
 ) -> wgpu::RenderPipeline {
-    gpu.device
+    ctx.device
         .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
             layout: Some(layout),
@@ -336,7 +336,7 @@ fn instanced_pipeline(
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: gpu.view_format,
+                    format: ctx.view_format,
                     blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -353,7 +353,7 @@ fn instanced_pipeline(
 }
 
 /// Uploads the baked MSDF atlas (PNG, RGBA8, linear data).
-fn atlas_texture(gpu: &Gpu) -> wgpu::Texture {
+fn atlas_texture(ctx: &Context) -> wgpu::Texture {
     let decoder = png::Decoder::new(std::io::Cursor::new(text::ATLAS_PNG));
     let mut reader = decoder.read_info().expect("baked atlas is a valid PNG");
     let mut pixels = vec![0; reader.output_buffer_size().expect("atlas size")];
@@ -364,8 +364,8 @@ fn atlas_texture(gpu: &Gpu) -> wgpu::Texture {
         (width, height, png::ColorType::Rgba)
     );
 
-    gpu.device.create_texture_with_data(
-        &gpu.queue,
+    ctx.device.create_texture_with_data(
+        &ctx.queue,
         &wgpu::TextureDescriptor {
             label: Some("msdf atlas"),
             size: wgpu::Extent3d {

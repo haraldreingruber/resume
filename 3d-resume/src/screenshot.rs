@@ -1,0 +1,214 @@
+//! Headless screenshots (`--screenshots <dir>`): renders stations offscreen
+//! to PNG files, without a window or event loop, so it also runs on machines
+//! without a display, e.g. CI with Mesa's software Vulkan driver
+//! (`WGPU_ADAPTER_NAME=llvmpipe`). Each image shows a station at rest, as the
+//! app shows it, including the native buttons.
+
+use std::path::{Path, PathBuf};
+
+use crate::focus;
+use crate::gpu::Context;
+use crate::renderer::Renderer;
+use crate::scene::Scene;
+use crate::ui::{self, UiLayer};
+
+/// The native window's default (logical) size.
+pub const DEFAULT_SIZE: [u32; 2] = [1280, 800];
+
+/// An image counts as rendered if at least this fraction of its pixels is
+/// bright (text); catches frames that come out blank.
+const MIN_BRIGHT: f64 = 0.001;
+
+pub struct Request {
+    pub dir: PathBuf,
+    /// One station (id or index) instead of all of them.
+    pub station: Option<String>,
+    pub size: [u32; 2],
+    /// Gives keyboard focus to the n-th focus target (shows its focus ring).
+    pub focus: Option<usize>,
+}
+
+/// Writes `NN-<id>.png` per station into `request.dir`.
+pub fn run(request: &Request) -> Result<(), String> {
+    let resume = crate::content::resume();
+    let mut scene = Scene::new(&resume);
+    let buttons = ui::native_buttons(&mut scene);
+    let stations: Vec<usize> = match &request.station {
+        Some(key) => vec![
+            scene
+                .station_index(key)
+                .ok_or_else(|| format!("unknown station `{key}`"))?,
+        ],
+        None => (0..scene.station_count()).collect(),
+    };
+
+    let ctx = pollster::block_on(context())?;
+    let [width, height] = request.size;
+    let mut renderer = Renderer::new(&ctx, &scene);
+    renderer.set_ui(&ctx, &UiLayer::buttons(width as f32, 1.0, &buttons));
+    let lens = Scene::lens(width as f32 / height as f32);
+    let projection = UiLayer::projection(width as f32, height as f32);
+    let target = ctx.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("screenshot"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: ctx.view_format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = target.create_view(&Default::default());
+    std::fs::create_dir_all(&request.dir).map_err(|e| format!("{}: {e}", request.dir.display()))?;
+
+    for station in stations {
+        let targets = focus::targets(&scene, station, &buttons);
+        let focused = request.focus.and_then(|n| targets.get(n).copied());
+        renderer.set_groups(&ctx, None, focused);
+        let camera = scene.camera(station as f32, &lens);
+        renderer.draw(&ctx, &view, &camera, projection);
+        let rgba = read_back(&ctx, &target)?;
+        let id = scene.station_id(station).unwrap_or("station");
+        let path = request.dir.join(format!("{station:02}-{id}.png"));
+        // Written even if blank, so the failure can be inspected.
+        write_png(&path, request.size, &rgba)?;
+        check_rendered(&rgba).map_err(|e| format!("{}: {e}", path.display()))?;
+        log::info!("wrote {}", path.display());
+    }
+    Ok(())
+}
+
+/// Parses `--size`, e.g. `1280x800`.
+pub fn parse_size(text: &str) -> Option<[u32; 2]> {
+    let (width, height) = text.split_once('x')?;
+    let size = [width.parse().ok()?, height.parse().ok()?];
+    size.iter()
+        .all(|&n| (1..=8192).contains(&n))
+        .then_some(size)
+}
+
+async fn context() -> Result<Context, String> {
+    let instance =
+        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle().with_env());
+    let adapter = wgpu::util::initialize_adapter_from_env_or_default(&instance, None)
+        .await
+        .map_err(|e| format!("no GPU adapter: {e}"))?;
+    log::info!("GPU adapter: {:?}", adapter.get_info());
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor {
+            label: Some("screenshots"),
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(Context {
+        device,
+        queue,
+        view_format: wgpu::TextureFormat::Rgba8UnormSrgb,
+    })
+}
+
+/// Copies the texture to the CPU: tightly packed RGBA rows (sRGB-encoded).
+fn read_back(ctx: &Context, texture: &wgpu::Texture) -> Result<Vec<u8>, String> {
+    let size = texture.size();
+    let row = size.width * 4;
+    let padded_row = row.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("screenshot readback"),
+        size: u64::from(padded_row * size.height),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = ctx.device.create_command_encoder(&Default::default());
+    encoder.copy_texture_to_buffer(
+        texture.as_image_copy(),
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_row),
+                rows_per_image: None,
+            },
+        },
+        size,
+    );
+    ctx.queue.submit([encoder.finish()]);
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    buffer.map_async(wgpu::MapMode::Read, .., move |result| {
+        let _ = sender.send(result);
+    });
+    ctx.device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .map_err(|e| e.to_string())?;
+    receiver
+        .recv()
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    let mapped = buffer.get_mapped_range(..).map_err(|e| e.to_string())?;
+    Ok(mapped
+        .chunks(padded_row as usize)
+        .flat_map(|padded| &padded[..row as usize])
+        .copied()
+        .collect())
+}
+
+/// Writes an opaque RGB PNG (the frame's alpha is always 1).
+fn write_png(path: &Path, [width, height]: [u32; 2], rgba: &[u8]) -> Result<(), String> {
+    let error = |e: &dyn std::fmt::Display| format!("{}: {e}", path.display());
+    let file = std::fs::File::create(path).map_err(|e| error(&e))?;
+    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    let rgb: Vec<u8> = rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|[r, g, b, _]| [*r, *g, *b])
+        .collect();
+    let mut writer = encoder.write_header().map_err(|e| error(&e))?;
+    writer.write_image_data(&rgb).map_err(|e| error(&e))?;
+    writer.finish().map_err(|e| error(&e))
+}
+
+/// Fails for a (nearly) blank image: too few bright (text) pixels.
+fn check_rendered(rgba: &[u8]) -> Result<(), String> {
+    let pixels = rgba.as_chunks::<4>().0;
+    let total = pixels.len();
+    let bright = pixels
+        .iter()
+        .filter(|[r, g, b, _]| [r, g, b].iter().any(|&&c| c > 150))
+        .count();
+    if (bright as f64) < total as f64 * MIN_BRIGHT {
+        return Err(format!(
+            "looks blank: only {bright} of {total} pixels are bright"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_sizes() {
+        assert_eq!(parse_size("1280x800"), Some([1280, 800]));
+        assert_eq!(parse_size("0x800"), None);
+        assert_eq!(parse_size("1280"), None);
+        assert_eq!(parse_size("wide x tall"), None);
+    }
+
+    #[test]
+    fn rejects_blank_images() {
+        let dark = [8u8, 16, 24, 255].repeat(1000);
+        assert!(check_rendered(&dark).is_err());
+        let mut text = dark.clone();
+        text[..40].copy_from_slice(&[240; 40]);
+        assert!(check_rendered(&text).is_ok());
+    }
+}
