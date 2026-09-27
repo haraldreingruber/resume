@@ -6,6 +6,11 @@ name: Native
 # releases ship exactly what CI tested.
 on:
   workflow_call:
+    inputs:
+      screenshots:
+        description: Render every station headlessly on Linux (Mesa's software Vulkan) and upload the PNGs.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -37,6 +42,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
       - run: cargo build -p resume-3d --release
+      # The release binary renders offscreen, so no display is needed; the
+      # run fails if a station comes out blank.
+      - name: Screenshots (software Vulkan)
+        if: inputs.screenshots && runner.os == 'Linux'
+        env:
+          WGPU_ADAPTER_NAME: llvmpipe
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq --no-install-recommends libvulkan1 mesa-vulkan-drivers
+          target/release/resume-3d --screenshots screenshots
+      # Also when a station came out blank, to see what went wrong.
+      - name: Upload screenshots
+        if: ${{ !cancelled() && inputs.screenshots && runner.os == 'Linux' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshots
+          path: screenshots
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

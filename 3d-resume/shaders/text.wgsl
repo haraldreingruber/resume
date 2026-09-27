@@ -10,8 +10,9 @@ struct Globals {
 }
 
 struct Groups {
-    // x: hover highlight (0..1) per group; group 0 is never highlighted.
-    highlight: array<vec4<f32>, 64>,
+    // Per group (group 0 is never highlighted): x = highlight (0..1),
+    // y = keyboard focus (used by focus rings in shapes.wgsl).
+    state: array<vec4<f32>, 64>,
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -44,7 +45,7 @@ fn vs_main(@builtin(vertex_index) index: u32, glyph: Glyph) -> VertexOutput {
     var out: VertexOutput;
     out.clip = globals.view_proj * vec4<f32>(world, 1.0);
     out.uv = vec2<f32>(mix(glyph.uv.x, glyph.uv.z, corner.x), mix(glyph.uv.w, glyph.uv.y, corner.y));
-    let highlight = groups.highlight[min(glyph.group, 63u)].x;
+    let highlight = groups.state[min(glyph.group, 63u)].x;
     out.color = vec4<f32>(mix(glyph.color.rgb, vec3<f32>(1.0), highlight * 0.35), glyph.color.a);
     out.world = world;
     return out;

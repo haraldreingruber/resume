@@ -4,6 +4,8 @@
 //! camera flies along a Catmull-Rom spline through them, so scrolling forward
 //! travels back in time.
 
+use std::ops::Range;
+
 use glam::{Mat4, Vec2, Vec3};
 use resume_model::{DateRange, Education, PartialDate, Project, Resume, RichText, Work};
 
@@ -68,6 +70,25 @@ pub struct Scene {
 struct Station {
     id: String,
     anchor: Vec3,
+    /// Hover groups of the station's links, in reading order.
+    links: Range<u32>,
+}
+
+impl Station {
+    fn new(id: &str, anchor: Vec3) -> Self {
+        Self {
+            id: id.to_owned(),
+            anchor,
+            links: 0..0,
+        }
+    }
+}
+
+/// One station's glyphs and shapes, and the hover groups of its links.
+struct Block {
+    glyphs: Vec<GlyphInstance>,
+    shapes: Vec<ShapeInstance>,
+    links: Range<u32>,
 }
 
 /// A clickable rectangle in a z-plane.
@@ -162,18 +183,14 @@ impl Scene {
             };
             Vec3::new(side, 0.6, -(i as f32) * SPACING)
         };
-        let mut stations = vec![Station {
-            id: "intro".to_owned(),
-            anchor: anchor(0),
-        }];
-        stations.extend(entries.iter().enumerate().map(|(i, entry)| Station {
-            id: entry.id().to_owned(),
-            anchor: anchor(i + 1),
-        }));
-        stations.push(Station {
-            id: "outro".to_owned(),
-            anchor: anchor(count - 1),
-        });
+        let mut stations = vec![Station::new("intro", anchor(0))];
+        stations.extend(
+            entries
+                .iter()
+                .enumerate()
+                .map(|(i, entry)| Station::new(entry.id(), anchor(i + 1))),
+        );
+        stations.push(Station::new("outro", anchor(count - 1)));
 
         // Build each station, then emit them far to near so that nearer
         // stations are drawn on top.
@@ -197,10 +214,11 @@ impl Scene {
         let points: Vec<Vec3> = stations.iter().map(|s| s.anchor).collect();
         let mut glyphs = Vec::new();
         let mut shapes = Vec::new();
-        for (i, (block_glyphs, block_shapes)) in blocks.into_iter().enumerate().rev() {
+        for (i, block) in blocks.into_iter().enumerate().rev() {
+            stations[i].links = block.links;
             shapes.extend(path_dots(&points, i));
-            shapes.extend(block_shapes);
-            glyphs.extend(block_glyphs);
+            shapes.extend(block.shapes);
+            glyphs.extend(block.glyphs);
         }
         Self {
             stations,
@@ -214,6 +232,17 @@ impl Scene {
 
     pub fn station_count(&self) -> usize {
         self.stations.len()
+    }
+
+    /// The deep-link id of a station (`intro`, `dedalus`, …, `outro`).
+    pub fn station_id(&self, station: usize) -> Option<&str> {
+        self.stations.get(station).map(|s| s.id.as_str())
+    }
+
+    /// Hover groups of a station's links, in reading order (keyboard focus
+    /// moves through them).
+    pub fn links(&self, station: usize) -> Range<u32> {
+        self.stations.get(station).map_or(0..0, |s| s.links.clone())
     }
 
     /// A deep-link target: a station id (`dedalus`, `intro`, `outro`) or index.
@@ -292,8 +321,8 @@ fn add_action(actions: &mut Vec<Action>, action: Action) -> u32 {
     actions.len() as u32
 }
 
-/// Accumulates one station's glyphs and shapes; hits and actions accumulate
-/// over the whole scene.
+/// Accumulates one station's glyphs and shapes; hits and actions (hover
+/// groups) accumulate over the whole scene.
 #[derive(Default)]
 struct Builder {
     glyphs: Vec<GlyphInstance>,
@@ -303,13 +332,15 @@ struct Builder {
 }
 
 impl Builder {
-    /// Runs `build` and returns the glyphs and shapes it added.
-    fn take(&mut self, build: impl FnOnce(&mut Self)) -> (Vec<GlyphInstance>, Vec<ShapeInstance>) {
+    /// Runs `build` and returns the glyphs, shapes and links it added.
+    fn take(&mut self, build: impl FnOnce(&mut Self)) -> Block {
+        let first = self.actions.len() as u32 + 1;
         build(self);
-        (
-            std::mem::take(&mut self.glyphs),
-            std::mem::take(&mut self.shapes),
-        )
+        Block {
+            glyphs: std::mem::take(&mut self.glyphs),
+            shapes: std::mem::take(&mut self.shapes),
+            links: first..self.actions.len() as u32 + 1,
+        }
     }
 
     /// Lays out a text block at `cursor` and moves the cursor below it.
@@ -376,7 +407,8 @@ impl Builder {
         cursor.y -= paragraph.height + gap;
     }
 
-    /// Underline plus a slightly enlarged hit region for a link's text box.
+    /// Underline, a slightly enlarged hit region and a focus ring for a
+    /// link's text box.
     fn link_decoration(
         &mut self,
         [x0, y0, x1, y1]: [f32; 4],
@@ -397,11 +429,12 @@ impl Builder {
             .group(group),
         );
         let pad = size * 0.2;
-        self.hits.push(Hit {
-            rect: [x0 - pad, y0 - pad, x1 + pad, y1 + pad],
-            z,
-            group,
-        });
+        let rect = [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
+        let (radius, border) = (size * 0.3, size * 0.06);
+        self.shapes.push(ShapeInstance::focus_ring(
+            rect, z, radius, border, color, group,
+        ));
+        self.hits.push(Hit { rect, z, group });
     }
 
     /// Outlined tags, wrapped into rows of at most `max_width` starting at
@@ -641,6 +674,7 @@ fn catmull_rom(points: &[Vec3], t: f32) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shapes::FOCUS_RING;
 
     #[test]
     fn spline_passes_through_points() {
@@ -688,6 +722,50 @@ mod tests {
         assert_eq!(scene.station_index("3"), Some(3));
         assert_eq!(scene.station_index("99"), None);
         assert_eq!(scene.station_index("unknown"), None);
+        // The address bar shows ids; they lead back to the same station.
+        for i in 0..scene.station_count() {
+            let id = scene.station_id(i).unwrap();
+            assert_eq!(scene.station_index(id), Some(i));
+        }
+        assert_eq!(scene.station_id(99), None);
+    }
+
+    #[test]
+    fn stations_own_their_links_in_order() {
+        let scene = Scene::new(&crate::content::resume());
+        let outro = scene.station_count() - 1;
+        // The outro's links are its contact details, in reading order.
+        let targets: Vec<&Action> = scene
+            .links(outro)
+            .filter_map(|group| scene.action(group))
+            .collect();
+        assert_eq!(
+            targets.first(),
+            Some(&&Action::OpenUrl(
+                "mailto:harald.reingruber@gmail.com".into()
+            ))
+        );
+        assert_eq!(targets.len(), 4);
+        // Every clickable group belongs to exactly one station.
+        let owned: usize = (0..scene.station_count())
+            .map(|i| scene.links(i).len())
+            .sum();
+        assert_eq!(owned, scene.actions.len());
+    }
+
+    #[test]
+    fn every_link_region_has_a_focus_ring() {
+        let scene = Scene::new(&crate::content::resume());
+        for hit in &scene.hits {
+            assert!(
+                scene
+                    .shapes
+                    .iter()
+                    .any(|s| s.group == hit.group | FOCUS_RING && s.rect == hit.rect),
+                "group {}",
+                hit.group
+            );
+        }
     }
 
     #[test]

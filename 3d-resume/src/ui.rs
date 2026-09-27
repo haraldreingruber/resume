@@ -5,12 +5,30 @@
 
 use glam::{Mat4, Vec3};
 
+use crate::scene::{Action, Scene};
 use crate::shapes::ShapeInstance;
 use crate::text::{self, Font, GlyphInstance, TextStyle, rgb};
 
 const BUTTON_TEXT: [f32; 4] = rgb(0xC9D4DE);
 const BUTTON_BORDER: [f32; 4] = rgb(0x3E5A73);
 const BUTTON_FILL: [f32; 4] = [0.0005, 0.002, 0.004, 0.6];
+/// Same as the web nav's focus outline.
+const FOCUS: [f32; 4] = rgb(0x6DB3E8);
+
+/// A screen-space button: its label and hover group.
+pub type Button = (&'static str, u32);
+
+/// The native "Text version" / "PDF" buttons, registered as scene actions.
+/// None on the web, where the page has an HTML nav instead.
+pub fn native_buttons(scene: &mut Scene) -> Vec<Button> {
+    if cfg!(target_arch = "wasm32") {
+        return Vec::new();
+    }
+    vec![
+        ("Text version", scene.add_action(Action::TextVersion)),
+        ("PDF", scene.add_action(Action::Pdf)),
+    ]
+}
 
 #[derive(Default)]
 pub struct UiLayer {
@@ -38,12 +56,24 @@ impl UiLayer {
             let w = text::width(Font::Bold, size, label) + 2.0 * pad_x;
             let rect = [right - w, margin, right, margin + height];
             let radius = height / 2.0;
+            // The fill stays out of the hover group: highlighting would
+            // lighten it and lower the label's contrast.
             layer
                 .shapes
-                .push(ShapeInstance::filled(rect, 0.0, radius, BUTTON_FILL).group(group));
+                .push(ShapeInstance::filled(rect, 0.0, radius, BUTTON_FILL));
             layer.shapes.push(
                 ShapeInstance::outlined(rect, 0.0, radius, scale, BUTTON_BORDER).group(group),
             );
+            let [x0, y0, x1, y1] = rect;
+            let ring = 3.0 * scale;
+            layer.shapes.push(ShapeInstance::focus_ring(
+                [x0 - ring, y0 - ring, x1 + ring, y1 + ring],
+                0.0,
+                radius + ring,
+                2.0 * scale,
+                FOCUS,
+                group,
+            ));
             let top = Vec3::new(right - w + pad_x, margin + height - pad_y * 0.8, 0.0);
             text::layout(label, style, top, &mut layer.glyphs);
             layer.hits.push((rect, group));

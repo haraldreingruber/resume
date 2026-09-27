@@ -36,6 +36,8 @@ jobs:
   native:
     name: Native
     uses: ./.github/workflows/native.yml
+    with:
+      screenshots: true
 
   latex:
     name: PDF
@@ -67,21 +69,28 @@ jobs:
       - name: Build
         working-directory: 3d-resume
         run: trunk build --release
-      - name: Report bundle sizes
-        working-directory: 3d-resume/dist
-        run: |
-          {
-            echo "### Web bundle"
-            echo "| File | Raw | gzip | brotli |"
-            echo "| --- | ---: | ---: | ---: |"
-            for f in *.wasm *.js; do
-              echo "| $f | $(stat -c%s "$f") | $(gzip -9c "$f" | wc -c) | $(brotli -c "$f" | wc -c) |"
-            done
-          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         with:
           name: web-dist
           path: 3d-resume/dist
+      # Baseline for the size report: the newest sizes saved by a master
+      # build (runs can read caches of the default branch).
+      - name: Restore the size baseline
+        uses: actions/cache/restore@v6
+        with:
+          path: web-size-baseline.txt
+          key: web-size-${{ github.sha }}
+          restore-keys: web-size-
+      - name: Report bundle sizes and check the budget
+        run: bash .github/scripts/web-size.sh 3d-resume/dist web-size-baseline.txt web-size.txt
+      - name: Keep these sizes as the new baseline
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: cp web-size.txt web-size-baseline.txt
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/cache/save@v6
+        with:
+          path: web-size-baseline.txt
+          key: web-size-${{ github.sha }}
 
   deploy:
     name: Deploy to GitHub Pages

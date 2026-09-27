@@ -1,7 +1,12 @@
-//! Browser glue: the page's canvas and the plain-HTML fallback.
+//! Browser glue: the page's canvas, the plain-HTML fallback, the address
+//! bar and keyboard focus leaving the canvas.
 
-use wasm_bindgen::JsCast;
-use web_sys::HtmlCanvasElement;
+use std::cell::Cell;
+use std::rc::Rc;
+
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::{JsCast, JsValue};
+use web_sys::{HtmlCanvasElement, KeyboardEvent};
 
 /// The `<canvas id="app">` from `web/index.html`.
 pub fn canvas() -> Option<HtmlCanvasElement> {
@@ -28,6 +33,57 @@ pub fn query_param(name: &str) -> Option<String> {
         .filter_map(|pair| pair.split_once('='))
         .find(|(key, _)| *key == name)
         .map(|(_, value)| value.to_owned())
+}
+
+/// Shows the station in view in the address bar (`?station=<id>`, or no
+/// parameter for the intro), keeping other parameters. Replaces the current
+/// history entry, so Back still leaves the page.
+pub fn show_station(id: Option<&str>) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(url) = window
+        .location()
+        .href()
+        .ok()
+        .and_then(|href| web_sys::Url::new(&href).ok())
+    else {
+        return;
+    };
+    let params = url.search_params();
+    match id {
+        Some(id) => params.set("station", id),
+        None => params.delete("station"),
+    }
+    if let Ok(history) = window.history() {
+        let _ = history.replace_state_with_url(&JsValue::NULL, "", Some(&url.href()));
+    }
+}
+
+/// Lets Tab move keyboard focus out of the canvas. winit prevents the
+/// default action of every key pressed on the canvas, which would trap focus
+/// there. This capture-phase listener runs first and stops Tab presses that
+/// should leave (`leaves`: [Tab, Shift+Tab], kept up to date by the app)
+/// from reaching winit, so the browser moves focus as usual.
+pub fn release_tab_at_edges(leaves: Rc<Cell<[bool; 2]>>) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let listener = Closure::<dyn FnMut(KeyboardEvent)>::new(move |event: KeyboardEvent| {
+        let on_canvas = event
+            .target()
+            .is_some_and(|target| target.has_type::<HtmlCanvasElement>());
+        if on_canvas && event.key() == "Tab" && leaves.get()[usize::from(event.shift_key())] {
+            event.stop_propagation();
+        }
+    });
+    let _ = window.add_event_listener_with_callback_and_bool(
+        "keydown",
+        listener.as_ref().unchecked_ref(),
+        true,
+    );
+    // Lives as long as the page.
+    listener.forget();
 }
 
 /// Opens a link: `mailto:` in place (the mail client takes over), anything

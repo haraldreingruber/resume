@@ -38,6 +38,11 @@ impl Timeline {
         self.position
     }
 
+    /// The station in view: the one nearest to the current position.
+    pub fn nearest(&self) -> usize {
+        self.position.round() as usize
+    }
+
     /// Continuous movement, e.g. wheel or touch; positive moves forward.
     pub fn scroll(&mut self, delta: f32) {
         self.target = (self.target + delta).clamp(0.0, self.last);
@@ -84,6 +89,9 @@ mod tests {
         timeline.step(-1);
         while timeline.update(1.0 / 60.0) {}
         assert_eq!(timeline.position(), 1.0);
+        timeline.scroll(0.6);
+        while timeline.update(1.0 / 60.0) {}
+        assert_eq!(timeline.nearest(), 2);
     }
 
     #[test]
