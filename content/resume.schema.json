@@ -139,7 +139,7 @@
           "pattern": "^#[0-9A-Fa-f]{6}$"
         },
         "x-id": {
-          "description": "Stable id, unique across the whole resume.",
+          "description": "Stable id, unique across the whole resume. The 3D resume's deep link\nto this station (`?station=<id>`) -- renaming it breaks saved links.",
           "type": "string"
         },
         "x-place": {
@@ -300,7 +300,7 @@
           "pattern": "^#[0-9A-Fa-f]{6}$"
         },
         "x-id": {
-          "description": "Stable id, unique across the whole resume.",
+          "description": "Stable id, unique across the whole resume. The 3D resume's deep link\nto this station (`?station=<id>`) -- renaming it breaks saved links.",
           "type": "string"
         },
         "x-place": {
@@ -419,7 +419,7 @@
           "pattern": "^#[0-9A-Fa-f]{6}$"
         },
         "x-id": {
-          "description": "Stable id, unique across the whole resume. Not currently referenced by\nany renderer (the 3D app's `?station=N` deep link is a numeric index\ninto `work`, not this id) -- reordering `work` changes what a saved\ndeep link points to.",
+          "description": "Stable id, unique across the whole resume. The 3D resume's deep link\nto this station (`?station=<id>`) -- renaming it breaks saved links.",
           "type": "string"
         },
         "x-place": {

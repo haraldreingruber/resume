@@ -1,7 +1,10 @@
-//! MSDF text: glyph metrics baked by `build.rs`, word-wrapped layout, and
-//! the per-glyph GPU instances drawn by `shaders/text.wgsl`.
+//! MSDF text: glyph metrics baked by `build.rs`, word-wrapped layout of styled
+//! runs, and the per-glyph GPU instances drawn by `shaders/text.wgsl`.
 //!
-//! Text lies in a plane facing +z; units are world units.
+//! Text lies in a plane facing +z (world units), or in screen pixels for the
+//! screen-space layer.
+
+use std::ops::Range;
 
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
@@ -57,12 +60,14 @@ fn metrics(font: Font) -> &'static FontMetrics {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct GlyphInstance {
-    /// World-space quad: x0, y0 (bottom), x1, y1 (top).
+    /// Quad: x0, y0 (bottom), x1, y1 (top).
     pub rect: [f32; 4],
     pub uv: [f32; 4],
     /// Linear RGBA.
     pub color: [f32; 4],
     pub z: f32,
+    /// Hover group (0 = not interactive), see `Renderer::set_highlight`.
+    pub group: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -74,13 +79,14 @@ pub enum Align {
 #[derive(Debug, Clone, Copy)]
 pub struct TextStyle {
     pub font: Font,
-    /// Em size in world units.
+    /// Em size in world units (or pixels on the screen-space layer).
     pub size: f32,
     pub color: [f32; 4],
     pub max_width: Option<f32>,
     pub align: Align,
     /// Multiple of the font's line height.
     pub line_spacing: f32,
+    pub group: u32,
 }
 
 impl TextStyle {
@@ -92,6 +98,7 @@ impl TextStyle {
             max_width: None,
             align: Align::Left,
             line_spacing: 1.0,
+            group: 0,
         }
     }
 
@@ -109,81 +116,171 @@ impl TextStyle {
         self.line_spacing = factor;
         self
     }
+
+    pub fn group(mut self, group: u32) -> Self {
+        self.group = group;
+        self
+    }
+}
+
+/// A styled piece of a paragraph (e.g. from a `RichText` span).
+#[derive(Debug, Clone, Copy)]
+pub struct Run<'a> {
+    pub text: &'a str,
+    pub font: Font,
+    pub color: [f32; 4],
+    /// Hover group; runs with a non-zero group get their boxes reported.
+    pub group: u32,
+}
+
+/// Result of laying out a paragraph.
+#[derive(Debug, Default)]
+pub struct Paragraph {
+    pub height: f32,
+    /// Per line, the box `[x0, y0, x1, y1]` of each run with a non-zero group,
+    /// e.g. for link underlines and hit regions.
+    pub boxes: Vec<(u32, [f32; 4])>,
 }
 
 fn advance(font: Font, ch: char) -> f32 {
     glyph(font, ch).map_or(0.0, |g| g.advance)
 }
 
-fn width(style: &TextStyle, text: &str) -> f32 {
-    text.chars().map(|ch| advance(style.font, ch)).sum::<f32>() * style.size
+/// Width of `text` in one font, in the units of `size`.
+pub fn width(font: Font, size: f32, text: &str) -> f32 {
+    text.chars().map(|ch| advance(font, ch)).sum::<f32>() * size
 }
 
-/// Greedy word wrap at spaces.
-fn lines<'a>(style: &TextStyle, text: &'a str) -> Vec<&'a str> {
-    let Some(max_width) = style.max_width else {
-        return vec![text];
-    };
+#[derive(Clone, Copy)]
+struct StyledChar {
+    ch: char,
+    font: Font,
+    run: usize,
+}
+
+fn chars_width(chars: &[StyledChar], size: f32) -> f32 {
+    chars.iter().map(|c| advance(c.font, c.ch)).sum::<f32>() * size
+}
+
+/// Greedy word wrap at spaces; returns line ranges (the breaking space is
+/// dropped).
+fn wrap(chars: &[StyledChar], size: f32, max_width: Option<f32>) -> Vec<Range<usize>> {
+    let max_width = max_width.unwrap_or(f32::INFINITY);
     let mut lines = Vec::new();
     let mut start = 0;
     let mut last_break = None;
-    for (i, ch) in text.char_indices() {
-        if ch == ' ' {
-            if width(style, &text[start..i]) > max_width
+    for (i, c) in chars.iter().enumerate() {
+        if c.ch == ' ' {
+            if chars_width(&chars[start..i], size) > max_width
                 && let Some(b) = last_break
             {
-                lines.push(&text[start..b]);
+                lines.push(start..b);
                 start = b + 1;
             }
             last_break = Some(i);
         }
     }
-    if width(style, &text[start..]) > max_width
+    if chars_width(&chars[start..], size) > max_width
         && let Some(b) = last_break.filter(|&b| b > start)
     {
-        lines.push(&text[start..b]);
+        lines.push(start..b);
         start = b + 1;
     }
-    lines.push(&text[start..]);
+    lines.push(start..chars.len());
     lines
 }
 
 /// Lays out `text` with its first line's top at `top_left` (for centered
 /// text, `top_left.x` is the center). Returns the block height.
 pub fn layout(text: &str, style: TextStyle, top_left: Vec3, out: &mut Vec<GlyphInstance>) -> f32 {
+    let run = Run {
+        text,
+        font: style.font,
+        color: style.color,
+        group: style.group,
+    };
+    layout_runs(&[run], style, top_left, out).height
+}
+
+/// Lays out styled runs as one paragraph. `style` provides size, wrapping,
+/// alignment and line spacing (line metrics come from `style.font`).
+pub fn layout_runs(
+    runs: &[Run],
+    style: TextStyle,
+    top_left: Vec3,
+    out: &mut Vec<GlyphInstance>,
+) -> Paragraph {
+    let chars: Vec<StyledChar> = runs
+        .iter()
+        .enumerate()
+        .flat_map(|(run, r)| {
+            r.text.chars().map(move |ch| StyledChar {
+                ch,
+                font: r.font,
+                run,
+            })
+        })
+        .collect();
     let m = metrics(style.font);
-    let line_advance = m.line_height * style.line_spacing * style.size;
-    let mut baseline = top_left.y - m.ascender * style.size;
-    let lines = lines(&style, text);
+    let size = style.size;
+    let line_advance = m.line_height * style.line_spacing * size;
+    let mut baseline = top_left.y - m.ascender * size;
+    let lines = wrap(&chars, size, style.max_width);
+    let mut boxes = Vec::new();
     for line in &lines {
+        let line_chars = &chars[line.clone()];
         let mut pen = match style.align {
             Align::Left => top_left.x,
-            Align::Center => top_left.x - width(&style, line) / 2.0,
+            Align::Center => top_left.x - chars_width(line_chars, size) / 2.0,
         };
-        for ch in line.chars() {
-            let Some(g) = glyph(style.font, ch) else {
+        // Box of the run currently being extended: (run, x0).
+        let mut open_box: Option<(usize, f32)> = None;
+        let close_box = |run: usize, x0: f32, x1: f32, boxes: &mut Vec<(u32, [f32; 4])>| {
+            let bottom = baseline + m.descender * size;
+            let top = baseline + m.ascender * size;
+            boxes.push((runs[run].group, [x0, bottom, x1, top]));
+        };
+        for c in line_chars {
+            let run = &runs[c.run];
+            if let Some((r, x0)) = open_box
+                && r != c.run
+            {
+                close_box(r, x0, pen, &mut boxes);
+                open_box = None;
+            }
+            if run.group != 0 && open_box.is_none() {
+                open_box = Some((c.run, pen));
+            }
+            let Some(g) = glyph(c.font, c.ch) else {
                 continue;
             };
             if g.visible {
                 let [l, b, r, t] = g.plane;
                 out.push(GlyphInstance {
                     rect: [
-                        pen + l * style.size,
-                        baseline + b * style.size,
-                        pen + r * style.size,
-                        baseline + t * style.size,
+                        pen + l * size,
+                        baseline + b * size,
+                        pen + r * size,
+                        baseline + t * size,
                     ],
                     uv: g.uv,
-                    color: style.color,
+                    color: run.color,
                     z: top_left.z,
+                    group: run.group,
                 });
             }
-            pen += g.advance * style.size;
+            pen += g.advance * size;
+        }
+        if let Some((r, x0)) = open_box {
+            close_box(r, x0, pen, &mut boxes);
         }
         baseline -= line_advance;
     }
-    let descent = -m.descender * style.size;
-    (lines.len() as f32 - 1.0) * line_advance + m.ascender * style.size + descent
+    let descent = -m.descender * size;
+    Paragraph {
+        height: (lines.len() as f32 - 1.0) * line_advance + m.ascender * size + descent,
+        boxes,
+    }
 }
 
 /// sRGB hex color to linear RGBA (the surface view is sRGB).
@@ -196,6 +293,11 @@ pub const fn rgb(hex: u32) -> [f32; 4] {
     ]
 }
 
+/// sRGB bytes (e.g. a resume entry's `accent`) to linear RGBA.
+pub const fn rgb_bytes([r, g, b]: [u8; 3]) -> [f32; 4] {
+    [srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), 1.0]
+}
+
 const fn srgb_to_linear(c: u8) -> f32 {
     // Cheap gamma 2.2 approximation, good enough for text colors (const fn).
     let c = c as f32 / 255.0;
@@ -205,6 +307,16 @@ const fn srgb_to_linear(c: u8) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn styled(text: &str) -> Vec<StyledChar> {
+        text.chars()
+            .map(|ch| StyledChar {
+                ch,
+                font: Font::Regular,
+                run: 0,
+            })
+            .collect()
+    }
 
     #[test]
     fn glyph_table_is_sorted_and_complete() {
@@ -234,9 +346,51 @@ mod tests {
 
     #[test]
     fn wraps_at_spaces() {
-        let style = TextStyle::new(Font::Regular, 1.0, [1.0; 4]);
-        let one_word = width(&style, "word");
-        let wrapped = lines(&style.wrap(one_word * 2.2), "word word word word");
-        assert_eq!(wrapped, ["word word", "word word"]);
+        let one_word = width(Font::Regular, 1.0, "word");
+        let chars = styled("word word word word");
+        let lines: Vec<String> = wrap(&chars, 1.0, Some(one_word * 2.2))
+            .into_iter()
+            .map(|range| chars[range].iter().map(|c| c.ch).collect())
+            .collect();
+        assert_eq!(lines, ["word word", "word word"]);
+    }
+
+    #[test]
+    fn reports_boxes_of_grouped_runs_per_line() {
+        let white = [1.0; 4];
+        let runs = [
+            Run {
+                text: "see ",
+                font: Font::Regular,
+                color: white,
+                group: 0,
+            },
+            Run {
+                text: "my site",
+                font: Font::Bold,
+                color: white,
+                group: 7,
+            },
+            Run {
+                text: " now",
+                font: Font::Regular,
+                color: white,
+                group: 0,
+            },
+        ];
+        let mut out = Vec::new();
+        let paragraph = layout_runs(
+            &runs,
+            TextStyle::new(Font::Regular, 1.0, white),
+            Vec3::ZERO,
+            &mut out,
+        );
+        assert_eq!(paragraph.boxes.len(), 1);
+        let (group, [x0, y0, x1, y1]) = paragraph.boxes[0];
+        assert_eq!(group, 7);
+        assert!((x0 - width(Font::Regular, 1.0, "see ")).abs() < 1e-5);
+        assert!((x1 - x0 - width(Font::Bold, 1.0, "my site")).abs() < 1e-5);
+        assert!(y1 > y0);
+        assert!(out.iter().any(|g| g.group == 7) && out.iter().any(|g| g.group == 0));
     }
 }

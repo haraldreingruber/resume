@@ -10,9 +10,7 @@ use minijinja::{AutoEscape, Environment, Value, context};
 use resume_model::{Basics, DateRange, Education, Language, Location, Project, Resume, RichText};
 use serde::{Deserialize, Serialize};
 
-/// Where CI publishes the web version (GitHub Pages).
-pub const SITE_URL: &str = "https://haraldreingruber.github.io/resume/";
-pub const PDF_FILE: &str = "Harald_Reingruber_resume.pdf";
+use resume_model::site::{PDF_FILE, SITE_URL};
 
 pub fn readme(resume: &Resume) -> anyhow::Result<String> {
     render("README.md.j2", resume)

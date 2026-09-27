@@ -10,11 +10,12 @@ use std::path::{Path, PathBuf};
 use std::{env, fs};
 
 use fdsm::bezier::scanline::FillRule;
+use fdsm::correct_error::{ErrorCorrectionConfig, correct_error_msdf};
 use fdsm::generate::generate_msdf;
 use fdsm::render::correct_sign_msdf;
 use fdsm::shape::Shape;
 use fdsm::transform::Transform;
-use image::{RgbImage, RgbaImage};
+use image::{Rgb32FImage, RgbImage, RgbaImage};
 use nalgebra::{Affine2, Similarity2, Vector2};
 use resume_model::Resume;
 use ttf_parser::Face;
@@ -162,10 +163,30 @@ fn bake_glyph(face: &Face, font: usize, ch: char) -> Option<Glyph> {
         .ceil() as u32;
 
     shape.transform(&transformation);
-    let prepared = Shape::edge_coloring_simple(shape, 0.03, 69441337420).prepare();
-    let mut msdf = RgbImage::new(width, height);
-    generate_msdf(&prepared, RANGE_PX, &mut msdf);
-    correct_sign_msdf(&mut msdf, &prepared, FillRule::Nonzero);
+    // msdfgen's default corner threshold: 3 rad, passed as its sine.
+    let colored = Shape::edge_coloring_simple(shape, 3.0f64.sin(), 69441337420);
+    let prepared = colored.prepare();
+    // Generate in f32 (values 0..1, 0.5 = edge): error correction needs it.
+    let mut field = Rgb32FImage::new(width, height);
+    generate_msdf(&prepared, RANGE_PX, &mut field);
+    correct_sign_msdf(&mut field, &prepared, FillRule::Nonzero);
+    // Removes the classic MSDF artifacts at sharp corners (e.g. a stray tick
+    // at the top of a bold "V"), as msdfgen does by default.
+    correct_error_msdf(
+        &mut field,
+        &colored,
+        &prepared,
+        RANGE_PX,
+        &ErrorCorrectionConfig::default(),
+    );
+    let mut msdf = RgbImage::from_fn(width, height, |x, y| {
+        image::Rgb(
+            field
+                .get_pixel(x, y)
+                .0
+                .map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8),
+        )
+    });
     // Font y points up, image rows go down.
     image::imageops::flip_vertical_in_place(&mut msdf);
 

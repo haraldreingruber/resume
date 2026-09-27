@@ -5,10 +5,13 @@
 mod app;
 mod content;
 mod gpu;
+mod links;
 mod renderer;
 mod scene;
+mod shapes;
 mod text;
 mod timeline;
+mod ui;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
@@ -29,7 +32,7 @@ fn main() {
     let event_loop = EventLoop::<app::AppEvent>::with_user_event()
         .build()
         .expect("create event loop");
-    let app = app::App::new(&event_loop, start_station());
+    let app = app::App::new(&event_loop, options());
 
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -43,16 +46,24 @@ fn main() {
     }
 }
 
-/// Deep link into the timeline: `?station=N` on the web, `--station N` natively.
-fn start_station() -> usize {
-    #[cfg(target_arch = "wasm32")]
-    let value = web::query_param("station");
-    #[cfg(not(target_arch = "wasm32"))]
-    let value = {
-        let args: Vec<String> = std::env::args().collect();
-        args.iter()
+/// Deep link and reduced motion from the page URL / media query.
+#[cfg(target_arch = "wasm32")]
+fn options() -> app::Options {
+    app::Options {
+        station: web::query_param("station"),
+        reduced_motion: web::prefers_reduced_motion(),
+    }
+}
+
+/// `--station <id|index>` and `--reduced-motion`.
+#[cfg(not(target_arch = "wasm32"))]
+fn options() -> app::Options {
+    let args: Vec<String> = std::env::args().collect();
+    app::Options {
+        station: args
+            .iter()
             .position(|a| a == "--station")
-            .and_then(|i| args.get(i + 1).cloned())
-    };
-    value.and_then(|v| v.parse().ok()).unwrap_or(0)
+            .and_then(|i| args.get(i + 1).cloned()),
+        reduced_motion: args.iter().any(|a| a == "--reduced-motion"),
+    }
 }
