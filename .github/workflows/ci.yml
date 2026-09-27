@@ -47,10 +47,11 @@ jobs:
           working_directory: latex
           root_file: main.tex
           args: -pdf -file-line-error -halt-on-error -interaction=nonstopmode -jobname=Harald_Reingruber_resume
-      - uses: actions/upload-artifact@v4
+      # Uploaded as-is (no zip wrapper); the artifact is named after the file.
+      - uses: actions/upload-artifact@v7
         with:
-          name: resume-pdf
           path: latex/Harald_Reingruber_resume.pdf
+          archive: false
 
   web:
     name: Web build
@@ -77,7 +78,7 @@ jobs:
               echo "| $f | $(stat -c%s "$f") | $(gzip -9c "$f" | wc -c) | $(brotli -c "$f" | wc -c) |"
             done
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: web-dist
           path: 3d-resume/dist
@@ -97,13 +98,13 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: web-dist
           path: site
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
-          name: resume-pdf
+          name: Harald_Reingruber_resume.pdf
           path: site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4

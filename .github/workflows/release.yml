@@ -29,10 +29,11 @@ jobs:
           working_directory: latex
           root_file: main.tex
           args: -pdf -file-line-error -halt-on-error -interaction=nonstopmode -jobname=Harald_Reingruber_resume
-      - uses: actions/upload-artifact@v4
+      # Uploaded as-is (no zip wrapper); the artifact is named after the file.
+      - uses: actions/upload-artifact@v7
         with:
-          name: resume-pdf
           path: latex/Harald_Reingruber_resume.pdf
+          archive: false
 
   release:
     name: GitHub Release
@@ -41,10 +42,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v5
+      # All artifacts here were uploaded without a zip wrapper; skip-decompress
+      # keeps the Windows .zip from being extracted, so it's attached as-is.
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
+          skip-decompress: true
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
