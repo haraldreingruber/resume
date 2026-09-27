@@ -2,13 +2,15 @@
 % Regenerate with `cargo gen latex`. Layout and styling live in main.tex, which
 % defines the presentation hooks used below:
 %   \ResumeEntry{title}{organization}{dates}{location}{body}, \ResumeEntrySep,
-%   \ResumeHighlights{items}, \ResumeTag{text}, \ResumeInfo{field}{value}
+%   \ResumeHighlights{items}, \ResumeTag{text}, \ResumeInfo{field}{value},
+%   \ResumeInfoBreak
 
 \newcommand{\ResumeName}{Jane Doe}
 \newcommand{\ResumeTagline}{Engineer \textperiodcentered{} Rust \& C\#}
 \newcommand{\ResumePersonalInfo}{%
   \ResumeInfo{email}{jane_doe@example.com}
   \ResumeInfo{location}{Vienna, Austria}
+  \ResumeInfoBreak
   \ResumeInfo{github}{jane-doe}
 %
 }
@@ -16,7 +18,7 @@
 
 % Sections: entries separated by \ResumeEntrySep.
 \newcommand{\ResumeExperience}{%
-\ResumeEntry{Dev -- Web}{Acme}{11/2020 -- Present}{Vienna, Austria}{%
+\ResumeEntry{Dev -- Web}{Acme}{11/2020 -- Present}{Vienna, Austria (Remote)}{%
 \ResumeHighlights{%
 \item Shipped \emph{C++}/DirectX~9 ``renderer''
 \item Cut costs by 50\%%
@@ -27,7 +29,7 @@
 \ResumeEntry{Intern}{Old Co}{2019}{}{}%
 }
 \newcommand{\ResumeProjects}{%
-\ResumeEntry{Master's Thesis -- Some University}{}{10/2018 -- 07/2019}{Graz}{``A Title'' -- improved things.}%
+\ResumeEntry{Master's Thesis -- Some University}{}{10/2018 -- 07/2019}{Graz, Austria}{``A Title'' -- improved things.}%
 }
 \newcommand{\ResumeEducation}{%
 \ResumeEntry{MSc Computer Science}{TU Wien}{2015 -- 2019}{}{Graphics, vision.}%

@@ -4,7 +4,7 @@
 
 **{{ b.label | md }}**
 
-{{ b.location | location }}{% for p in b.profiles %} · [{{ p.network | md }}]({{ p.url }}){% endfor %}
+{{ b.location | location }}{% for p in b | labeled_profiles %} · [{{ p.label | md }}]({{ p.url }}){% endfor %}
 
 
 [3D resume]({{ site_url }}) · [PDF]({{ site_url }}{{ pdf_file }}) · [Plain HTML]({{ site_url }}plain.html)

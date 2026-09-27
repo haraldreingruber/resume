@@ -4,17 +4,25 @@
 //! `x-` extension fields. Unknown fields are rejected to catch typos. Doc
 //! comments end up in the generated JSON schema, i.e. as editor hover help.
 
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 /// ISO 8601 date with optional month/day: `2020`, `2020-11` or `2020-11-03`.
 const DATE_PATTERN: &str = r"^\d{4}(-\d{2}(-\d{2})?)?$";
+/// Accent color, e.g. `#005B96`.
+const COLOR_PATTERN: &str = r"^#[0-9A-Fa-f]{6}$";
 
 /// Resume content, following the JSON Resume schema plus `x-` extension fields.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
     pub basics: Basics,
+    /// Places referenced by `x-place` in work, projects and education, by id
+    /// (kebab-case), e.g. `vienna: { city: Vienna, countryCode: AT }`.
+    #[serde(rename = "x-places", default)]
+    pub places: BTreeMap<String, Place>,
     /// Work experience, most recent first.
     #[serde(default)]
     pub work: Vec<Work>,
@@ -56,6 +64,25 @@ pub struct Location {
     pub country_code: Option<String>,
 }
 
+/// A place entries can refer to; rendered as "City, Country".
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Place {
+    pub city: String,
+    /// ISO 3166-1 alpha-2 code, e.g. `AT`.
+    #[schemars(regex(pattern = r"^[A-Z]{2}$"))]
+    pub country_code: String,
+}
+
+/// Remote work: `true` (appends "(Remote)" to the place, or just "Remote"),
+/// or a scope such as `Worldwide` ("Remote (Worldwide)").
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Remote {
+    Flag(bool),
+    Scope(String),
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
@@ -78,7 +105,11 @@ pub struct Work {
     pub position: String,
     /// Company name.
     pub name: String,
-    pub location: Option<String>,
+    /// Id of an entry in `x-places`.
+    #[serde(rename = "x-place")]
+    pub place: Option<String>,
+    #[serde(rename = "x-remote")]
+    pub remote: Option<Remote>,
     #[schemars(regex(pattern = DATE_PATTERN))]
     pub start_date: String,
     /// Omit for the current position.
@@ -89,6 +120,13 @@ pub struct Work {
     /// Bullet points (inline Markdown each).
     #[serde(default)]
     pub highlights: Vec<String>,
+    /// Skills used, as exact keywords from `skills[].keywords`.
+    #[serde(rename = "x-skills", default)]
+    pub skills: Vec<String>,
+    /// Accent color for this entry in the 3D resume, e.g. `#005B96`.
+    #[serde(rename = "x-color")]
+    #[schemars(regex(pattern = COLOR_PATTERN))]
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -106,12 +144,22 @@ pub struct Project {
     pub name: String,
     /// What was achieved (inline Markdown).
     pub description: Option<String>,
-    #[serde(rename = "x-location")]
-    pub location: Option<String>,
+    /// Id of an entry in `x-places`.
+    #[serde(rename = "x-place")]
+    pub place: Option<String>,
+    #[serde(rename = "x-remote")]
+    pub remote: Option<Remote>,
     #[schemars(regex(pattern = DATE_PATTERN))]
     pub start_date: String,
     #[schemars(regex(pattern = DATE_PATTERN))]
     pub end_date: Option<String>,
+    /// Skills used, as exact keywords from `skills[].keywords`.
+    #[serde(rename = "x-skills", default)]
+    pub skills: Vec<String>,
+    /// Accent color for this entry in the 3D resume, e.g. `#005B96`.
+    #[serde(rename = "x-color")]
+    #[schemars(regex(pattern = COLOR_PATTERN))]
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -137,8 +185,11 @@ pub struct Education {
     /// Field of study, e.g. `Computer Science, Visual Computing`.
     pub area: Option<String>,
     pub institution: String,
-    #[serde(rename = "x-location")]
-    pub location: Option<String>,
+    /// Id of an entry in `x-places`.
+    #[serde(rename = "x-place")]
+    pub place: Option<String>,
+    #[serde(rename = "x-remote")]
+    pub remote: Option<Remote>,
     #[schemars(regex(pattern = DATE_PATTERN))]
     pub start_date: String,
     #[schemars(regex(pattern = DATE_PATTERN))]
@@ -146,6 +197,10 @@ pub struct Education {
     /// Focus topics; rendered as one sentence.
     #[serde(default)]
     pub courses: Vec<String>,
+    /// Accent color for this entry in the 3D resume, e.g. `#005B96`.
+    #[serde(rename = "x-color")]
+    #[schemars(regex(pattern = COLOR_PATTERN))]
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

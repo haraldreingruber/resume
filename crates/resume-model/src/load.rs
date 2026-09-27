@@ -1,6 +1,6 @@
 //! Parse `resume.yaml`, validate it and normalize it into the domain model.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -9,7 +9,7 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use crate::domain::*;
 use crate::source;
 
-/// ISO 3166-1 alpha-2 codes accepted in `basics.location.countryCode`.
+/// ISO 3166-1 alpha-2 codes accepted in `countryCode` fields.
 const COUNTRIES: &[(&str, &str)] = &[
     ("AT", "Austria"),
     ("BE", "Belgium"),
@@ -83,6 +83,10 @@ pub fn load_str(yaml: &str) -> Result<Resume, LoadError> {
 struct Normalizer {
     errors: Vec<String>,
     ids: HashSet<String>,
+    /// `x-places` id -> display string ("City, Country").
+    places: BTreeMap<String, String>,
+    /// Every skill keyword, for validating `x-skills` references.
+    keywords: BTreeSet<String>,
 }
 
 impl Normalizer {
@@ -91,11 +95,21 @@ impl Normalizer {
     }
 
     fn resume(&mut self, source: source::Source) -> Resume {
+        // Places and skills first: entries refer to them.
+        for (id, place) in source.places {
+            let display = self.place(&id, place);
+            self.places.insert(id, display);
+        }
+        let skills = self.list(source.skills, "skills", Self::skill);
+        self.keywords = skills
+            .iter()
+            .flat_map(|group| group.keywords.iter().cloned())
+            .collect();
         Resume {
             basics: self.basics(source.basics),
             work: self.list(source.work, "work", Self::work),
             projects: self.list(source.projects, "projects", Self::project),
-            skills: self.list(source.skills, "skills", Self::skill),
+            skills,
             education: self.list(source.education, "education", Self::education),
             languages: self.list(source.languages, "languages", |n, path, language| {
                 Language {
@@ -123,19 +137,10 @@ impl Normalizer {
     }
 
     fn basics(&mut self, basics: source::Basics) -> Basics {
-        let country = basics.location.country_code.and_then(|code| {
-            let name = COUNTRIES
-                .iter()
-                .find(|(c, _)| *c == code)
-                .map(|(_, name)| name.to_string());
-            if name.is_none() {
-                self.error(
-                    "basics.location.countryCode",
-                    format!("unknown country code `{code}` (add it to COUNTRIES in resume-model)"),
-                );
-            }
-            name
-        });
+        let country = basics
+            .location
+            .country_code
+            .and_then(|code| self.country("basics.location.countryCode", &code));
         Basics {
             name: self.text("basics.name", basics.name),
             label: self.text("basics.label", basics.label),
@@ -164,9 +169,7 @@ impl Normalizer {
             id: self.id(path, work.id),
             position: self.text(&format!("{path}.position"), work.position),
             organization: self.text(&format!("{path}.name"), work.name),
-            location: work
-                .location
-                .map(|l| self.text(&format!("{path}.location"), l)),
+            location: self.whereabouts(path, work.place, work.remote),
             dates: self.date_range(path, &work.start_date, work.end_date.as_deref()),
             summary: work
                 .summary
@@ -177,6 +180,8 @@ impl Normalizer {
                 .enumerate()
                 .map(|(i, h)| self.rich(&format!("{path}.highlights[{i}]"), h))
                 .collect(),
+            skills: self.skill_refs(path, work.skills),
+            accent: self.accent(path, work.color),
         }
     }
 
@@ -191,10 +196,10 @@ impl Normalizer {
             description: project
                 .description
                 .map(|d| self.rich(&format!("{path}.description"), &d)),
-            location: project
-                .location
-                .map(|l| self.text(&format!("{path}.x-location"), l)),
+            location: self.whereabouts(path, project.place, project.remote),
             dates: self.date_range(path, &project.start_date, project.end_date.as_deref()),
+            skills: self.skill_refs(path, project.skills),
+            accent: self.accent(path, project.color),
         }
     }
 
@@ -221,9 +226,7 @@ impl Normalizer {
                 .area
                 .map(|a| self.text(&format!("{path}.area"), a)),
             institution: self.text(&format!("{path}.institution"), education.institution),
-            location: education
-                .location
-                .map(|l| self.text(&format!("{path}.x-location"), l)),
+            location: self.whereabouts(path, education.place, education.remote),
             dates: self.date_range(path, &education.start_date, education.end_date.as_deref()),
             courses: education
                 .courses
@@ -231,24 +234,127 @@ impl Normalizer {
                 .enumerate()
                 .map(|(i, c)| self.text(&format!("{path}.courses[{i}]"), c))
                 .collect(),
+            accent: self.accent(path, education.color),
         }
+    }
+
+    /// An `x-places` entry, resolved to its display string ("City, Country").
+    fn place(&mut self, id: &str, place: source::Place) -> String {
+        let path = format!("x-places.{id}");
+        self.kebab_case(&path, id);
+        let city = self.text(&format!("{path}.city"), place.city);
+        let country = self.country(&format!("{path}.countryCode"), &place.country_code);
+        join_present([Some(city.as_str()), country.as_deref()], ", ").unwrap_or_default()
+    }
+
+    /// Country name for an ISO code from `COUNTRIES`.
+    fn country(&mut self, path: &str, code: &str) -> Option<String> {
+        let name = COUNTRIES
+            .iter()
+            .find(|(c, _)| *c == code)
+            .map(|(_, name)| name.to_string());
+        if name.is_none() {
+            self.error(
+                path,
+                format!("unknown country code `{code}` (add it to COUNTRIES in resume-model)"),
+            );
+        }
+        name
+    }
+
+    /// Resolves `x-place` / `x-remote` into the displayed location, e.g.
+    /// "Vienna, Austria", "Scharnstein, Austria (Remote)" or "Remote (Worldwide)".
+    fn whereabouts(
+        &mut self,
+        path: &str,
+        place: Option<String>,
+        remote: Option<source::Remote>,
+    ) -> Option<String> {
+        let place = place.and_then(|id| {
+            let resolved = self.places.get(&id).cloned();
+            if resolved.is_none() {
+                let known: Vec<&str> = self.places.keys().map(String::as_str).collect();
+                let message = format!(
+                    "unknown place `{id}` (defined in x-places: {})",
+                    known.join(", ")
+                );
+                self.error(&format!("{path}.x-place"), message);
+            }
+            resolved
+        });
+        let scope = match remote {
+            None | Some(source::Remote::Flag(false)) => return place,
+            Some(source::Remote::Flag(true)) => None,
+            Some(source::Remote::Scope(scope)) => {
+                Some(self.text(&format!("{path}.x-remote"), scope))
+            }
+        };
+        Some(match (place, scope) {
+            (Some(place), None) => format!("{place} (Remote)"),
+            (Some(place), Some(scope)) => format!("{place} (Remote, {scope})"),
+            (None, None) => "Remote".to_owned(),
+            (None, Some(scope)) => format!("Remote ({scope})"),
+        })
+    }
+
+    /// `x-skills`: exact keywords from `skills[].keywords`, each listed once.
+    fn skill_refs(&mut self, path: &str, skills: Vec<String>) -> Vec<String> {
+        let mut seen = HashSet::new();
+        skills
+            .into_iter()
+            .enumerate()
+            .map(|(i, skill)| {
+                let path = format!("{path}.x-skills[{i}]");
+                let skill = self.text(&path, skill);
+                if !self.keywords.contains(&skill) {
+                    let known: Vec<&str> = self.keywords.iter().map(String::as_str).collect();
+                    let message = format!(
+                        "`{skill}` is not a keyword in skills[] (known: {})",
+                        known.join(", ")
+                    );
+                    self.error(&path, message);
+                } else if !seen.insert(skill.clone()) {
+                    self.error(&path, format!("`{skill}` is listed twice"));
+                }
+                skill
+            })
+            .collect()
+    }
+
+    /// `x-color`: `#RRGGBB`.
+    fn accent(&mut self, path: &str, color: Option<String>) -> Option<[u8; 3]> {
+        let color = color?;
+        let rgb = color
+            .strip_prefix('#')
+            .filter(|hex| hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+            .map(|hex| [0, 2, 4].map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0)));
+        if rgb.is_none() {
+            self.error(
+                &format!("{path}.x-color"),
+                format!("`{color}` is not a color like #005B96"),
+            );
+        }
+        rgb
     }
 
     /// Stable ids: kebab-case, unique across the whole resume.
     fn id(&mut self, path: &str, id: String) -> String {
+        let path = format!("{path}.x-id");
+        if self.kebab_case(&path, &id) && !self.ids.insert(id.clone()) {
+            self.error(&path, format!("duplicate id `{id}`"));
+        }
+        id
+    }
+
+    fn kebab_case(&mut self, path: &str, id: &str) -> bool {
         let valid = !id.is_empty()
             && id
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
         if !valid {
-            self.error(
-                &format!("{path}.x-id"),
-                format!("`{id}` must be kebab-case ([a-z0-9-]+)"),
-            );
-        } else if !self.ids.insert(id.clone()) {
-            self.error(&format!("{path}.x-id"), format!("duplicate id `{id}`"));
+            self.error(path, format!("`{id}` must be kebab-case ([a-z0-9-]+)"));
         }
-        id
+        valid
     }
 
     /// Plain (non-Markdown) text: trimmed, `--`/`---` turned into dashes.
@@ -359,6 +465,9 @@ impl Normalizer {
     }
 }
 
+/// The dash part of pulldown-cmark's smart punctuation, for plain fields.
+/// Plain fields (titles, names, keywords) are deliberately not Markdown-parsed:
+/// text like `C#`, `C++` or `SIMD (SSE/AVX/Neon)` must stay literal.
 fn smart_dashes(text: &str) -> String {
     text.replace("---", "—").replace("--", "–")
 }
@@ -421,6 +530,16 @@ basics:
         );
         assert_eq!(resume.work[0].dates.to_string(), "11/2020 – Present");
         assert!(resume.skill_group("practices").is_some());
+        let locations: Vec<Option<&str>> =
+            resume.work.iter().map(|w| w.location.as_deref()).collect();
+        assert_eq!(locations[0], Some("Scharnstein, Austria (Remote)"));
+        assert_eq!(locations[1], Some("Remote (Worldwide)"));
+        assert_eq!(locations[2], Some("Vienna, Austria"));
+        assert_eq!(
+            resume.projects[1].location.as_deref(),
+            Some("Barcelona, Spain")
+        );
+        assert!(resume.work[0].skills.iter().any(|s| s == "Rust"));
     }
 
     #[test]
@@ -515,6 +634,102 @@ basics:
             errors,
             ["work[0]: endDate 2019 is before startDate 06/2020"]
         );
+    }
+
+    const PLACES_AND_SKILLS: &str = "\
+x-places:
+  vienna: { city: Vienna, countryCode: AT }
+skills:
+  - { x-id: code, name: Code, keywords: [Rust, C#] }
+";
+
+    fn with_places_and_work(work: &str) -> String {
+        format!("{MINIMAL}{PLACES_AND_SKILLS}work:\n{work}")
+    }
+
+    #[test]
+    fn resolves_places_and_remote() {
+        let resume = load_str(&with_places_and_work(concat!(
+            "  - { x-id: a, position: Dev, name: A, startDate: '2020', x-place: vienna }\n",
+            "  - { x-id: b, position: Dev, name: B, startDate: '2020', x-place: vienna, x-remote: true }\n",
+            "  - { x-id: c, position: Dev, name: C, startDate: '2020', x-place: vienna, x-remote: EU }\n",
+            "  - { x-id: d, position: Dev, name: D, startDate: '2020', x-remote: true }\n",
+            "  - { x-id: e, position: Dev, name: E, startDate: '2020', x-remote: Worldwide }\n",
+            "  - { x-id: f, position: Dev, name: F, startDate: '2020', x-place: vienna, x-remote: false }\n",
+            "  - { x-id: g, position: Dev, name: G, startDate: '2020' }\n",
+        )))
+        .unwrap_or_else(|e| panic!("{e}"));
+        let locations: Vec<Option<&str>> =
+            resume.work.iter().map(|w| w.location.as_deref()).collect();
+        assert_eq!(
+            locations,
+            [
+                Some("Vienna, Austria"),
+                Some("Vienna, Austria (Remote)"),
+                Some("Vienna, Austria (Remote, EU)"),
+                Some("Remote"),
+                Some("Remote (Worldwide)"),
+                Some("Vienna, Austria"),
+                None,
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_places_and_bad_place_definitions() {
+        let yaml = format!(
+            "{MINIMAL}x-places:\n  Bad_Id: {{ city: X, countryCode: XX }}\nwork:\n{}",
+            "  - { x-id: a, position: Dev, name: A, startDate: '2020', x-place: graz }"
+        );
+        assert_eq!(
+            errors(&yaml),
+            [
+                "x-places.Bad_Id: `Bad_Id` must be kebab-case ([a-z0-9-]+)",
+                "x-places.Bad_Id.countryCode: unknown country code `XX` (add it to COUNTRIES in resume-model)",
+                "work[0].x-place: unknown place `graz` (defined in x-places: Bad_Id)",
+            ]
+        );
+    }
+
+    #[test]
+    fn validates_skill_references() {
+        let resume = load_str(&with_places_and_work(
+            "  - { x-id: a, position: Dev, name: A, startDate: '2020', x-skills: [Rust, 'C#'] }",
+        ))
+        .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(resume.work[0].skills, ["Rust", "C#"]);
+
+        let errors = errors(&with_places_and_work(
+            "  - { x-id: a, position: Dev, name: A, startDate: '2020', x-skills: [Rust, rust, Rust] }",
+        ));
+        assert_eq!(
+            errors,
+            [
+                "work[0].x-skills[1]: `rust` is not a keyword in skills[] (known: C#, Rust)",
+                "work[0].x-skills[2]: `Rust` is listed twice",
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_accent_colors() {
+        let resume = load_str(&with_places_and_work(
+            "  - { x-id: a, position: Dev, name: A, startDate: '2020', x-color: '#005B96' }",
+        ))
+        .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(resume.work[0].accent, Some([0x00, 0x5B, 0x96]));
+
+        for bad in ["005B96", "#05B96", "#GG5B96"] {
+            let errors = errors(&with_places_and_work(&format!(
+                "  - {{ x-id: a, position: Dev, name: A, startDate: '2020', x-color: '{bad}' }}"
+            )));
+            assert_eq!(
+                errors,
+                [format!(
+                    "work[0].x-color: `{bad}` is not a color like #005B96"
+                )]
+            );
+        }
     }
 
     #[test]

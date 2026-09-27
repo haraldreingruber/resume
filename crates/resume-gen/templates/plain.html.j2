@@ -101,8 +101,8 @@
     <ul class="contact">
       <li><a href="mailto:{{ b.email }}">{{ b.email }}</a></li>
       <li>{{ b.location | location }}</li>
-      {% for p in b.profiles %}
-      <li><a href="{{ p.url }}">{{ p.network }}</a></li>
+      {% for p in b | labeled_profiles %}
+      <li><a href="{{ p.url }}">{{ p.label }}</a></li>
       {% endfor %}
     </ul>
     <ul class="actions">

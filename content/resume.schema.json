@@ -41,6 +41,13 @@
       "items": {
         "$ref": "#/definitions/Work"
       }
+    },
+    "x-places": {
+      "description": "Places referenced by `x-place` in work, projects and education, by id\n(kebab-case), e.g. `vienna: { city: Vienna, countryCode: AT }`.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/Place"
+      }
     }
   },
   "additionalProperties": false,
@@ -123,14 +130,33 @@
             "null"
           ]
         },
+        "x-color": {
+          "description": "Accent color for this entry in the 3D resume, e.g. `#005B96`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
         "x-id": {
           "description": "Stable id, unique across the whole resume.",
           "type": "string"
         },
-        "x-location": {
+        "x-place": {
+          "description": "Id of an entry in `x-places`.",
           "type": [
             "string",
             "null"
+          ]
+        },
+        "x-remote": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Remote"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -184,6 +210,25 @@
       "additionalProperties": false,
       "required": [
         "city"
+      ]
+    },
+    "Place": {
+      "description": "A place entries can refer to; rendered as \"City, Country\".",
+      "type": "object",
+      "properties": {
+        "city": {
+          "type": "string"
+        },
+        "countryCode": {
+          "description": "ISO 3166-1 alpha-2 code, e.g. `AT`.",
+          "type": "string",
+          "pattern": "^[A-Z]{2}$"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "city",
+        "countryCode"
       ]
     },
     "Profile": {
@@ -246,15 +291,42 @@
             "null"
           ]
         },
+        "x-color": {
+          "description": "Accent color for this entry in the 3D resume, e.g. `#005B96`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
         "x-id": {
           "description": "Stable id, unique across the whole resume.",
           "type": "string"
         },
-        "x-location": {
+        "x-place": {
+          "description": "Id of an entry in `x-places`.",
           "type": [
             "string",
             "null"
           ]
+        },
+        "x-remote": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Remote"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "x-skills": {
+          "description": "Skills used, as exact keywords from `skills[].keywords`.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false,
@@ -262,6 +334,17 @@
         "x-id",
         "name",
         "startDate"
+      ]
+    },
+    "Remote": {
+      "description": "Remote work: `true` (appends \"(Remote)\" to the place, or just \"Remote\"),\nor a scope such as `Worldwide` (\"Remote (Worldwide)\").",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string"
+        }
       ]
     },
     "Skill": {
@@ -308,12 +391,6 @@
             "type": "string"
           }
         },
-        "location": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "name": {
           "description": "Company name.",
           "type": "string"
@@ -333,9 +410,42 @@
             "null"
           ]
         },
+        "x-color": {
+          "description": "Accent color for this entry in the 3D resume, e.g. `#005B96`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
         "x-id": {
           "description": "Stable id, unique across the whole resume. Not currently referenced by\nany renderer (the 3D app's `?station=N` deep link is a numeric index\ninto `work`, not this id) -- reordering `work` changes what a saved\ndeep link points to.",
           "type": "string"
+        },
+        "x-place": {
+          "description": "Id of an entry in `x-places`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "x-remote": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Remote"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "x-skills": {
+          "description": "Skills used, as exact keywords from `skills[].keywords`.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false,

@@ -2,12 +2,13 @@
 //!
 //! Templates get the [`Resume`] as context plus filters for formatting:
 //! `md` / `html` (plain strings or rich text), `dates`, `heading` (project),
-//! `title` and `courses` (education), `location`, `language`.
+//! `title` and `courses` (education), `location`, `language`, and
+//! `labeled_profiles` (basics -> `[{label, url}]`).
 
 use minijinja::value::ViaDeserialize;
 use minijinja::{AutoEscape, Environment, Value, context};
-use resume_model::{DateRange, Education, Language, Location, Project, Resume, RichText};
-use serde::Deserialize;
+use resume_model::{Basics, DateRange, Education, Language, Location, Project, Resume, RichText};
+use serde::{Deserialize, Serialize};
 
 /// Where CI publishes the web version (GitHub Pages).
 pub const SITE_URL: &str = "https://haraldreingruber.github.io/resume/";
@@ -77,7 +78,25 @@ fn environment() -> Environment<'static> {
     env.add_filter("language", |language: ViaDeserialize<Language>| {
         language.to_string()
     });
+    env.add_filter("labeled_profiles", |basics: ViaDeserialize<Basics>| {
+        let links: Vec<ProfileLink> = basics
+            .labeled_profiles()
+            .into_iter()
+            .map(|(label, profile)| ProfileLink {
+                label,
+                url: profile.url.clone(),
+            })
+            .collect();
+        Value::from_serialize(links)
+    });
     env
+}
+
+/// A profile link with a label that disambiguates repeated networks.
+#[derive(Serialize)]
+struct ProfileLink {
+    label: String,
+    url: String,
 }
 
 #[derive(Deserialize)]
