@@ -1,8 +1,9 @@
 //! winit application: creates the window, initializes the GPU (async on the
-//! web), turns input into timeline movement, link clicks and keyboard focus,
-//! and renders on demand.
+//! web), turns input into timeline movement, link clicks, keyboard focus and
+//! fullscreen toggles, and renders on demand.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use glam::Vec2;
 use web_time::Instant;
@@ -27,6 +28,10 @@ const SCROLL_PER_LINE: f32 = 0.35;
 const SCROLL_PER_PIXEL: f32 = 1.0 / 400.0;
 /// A touch that moves less than this (physical pixels) is a tap.
 const TAP_SLOP: f64 = 12.0;
+/// Two clicks or taps on empty space within this time and distance (physical
+/// pixels) are a double-click, which toggles fullscreen.
+const DOUBLE_PRESS_TIME: Duration = Duration::from_millis(400);
+const DOUBLE_PRESS_SLOP: f64 = 24.0;
 
 pub enum AppEvent {
     /// GPU initialization finished (asynchronous on the web).
@@ -58,6 +63,8 @@ pub struct App {
     touch: Option<Touch>,
     /// Hover group with keyboard focus (Tab / Shift+Tab, Enter opens it).
     focused: Option<u32>,
+    /// The last click or tap on empty space (half of a double-click).
+    empty_press: Option<Press>,
     modifiers: ModifiersState,
     /// The station in view, and the one last shown in the address bar.
     station: usize,
@@ -72,6 +79,15 @@ struct State {
     renderer: Renderer,
     lens: Lens,
     ui: UiLayer,
+}
+
+/// When and where a click or tap happened.
+type Press = (Instant, PhysicalPosition<f64>);
+
+/// Whether `second` completes a double-click (or double-tap) with `first`.
+fn is_double_press((t0, p0): Press, (t1, p1): Press) -> bool {
+    t1.saturating_duration_since(t0) <= DOUBLE_PRESS_TIME
+        && (p1.x - p0.x).hypot(p1.y - p0.y) <= DOUBLE_PRESS_SLOP
 }
 
 struct Touch {
@@ -107,6 +123,7 @@ impl App {
             pressed: None,
             touch: None,
             focused: None,
+            empty_press: None,
             modifiers: ModifiersState::empty(),
             station: start,
             shown_station: start,
@@ -278,6 +295,45 @@ impl App {
         }
     }
 
+    /// A click or tap on empty space; the second of a quick pair toggles
+    /// fullscreen.
+    fn press_empty(&mut self, position: PhysicalPosition<f64>) {
+        let press = (Instant::now(), position);
+        if self
+            .empty_press
+            .take()
+            .is_some_and(|first| is_double_press(first, press))
+        {
+            self.toggle_fullscreen();
+        } else {
+            self.empty_press = Some(press);
+        }
+    }
+
+    /// Web: the whole page (keeps the HTML nav); native: borderless on the
+    /// current monitor.
+    fn toggle_fullscreen(&self) {
+        #[cfg(target_arch = "wasm32")]
+        crate::web::toggle_fullscreen();
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(window) = &self.window {
+            window.set_fullscreen(match window.fullscreen() {
+                Some(_) => None,
+                None => Some(winit::window::Fullscreen::Borderless(None)),
+            });
+        }
+    }
+
+    /// Native Esc; browsers handle Esc in fullscreen themselves.
+    fn leave_fullscreen(&self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(window) = &self.window
+            && window.fullscreen().is_some()
+        {
+            window.set_fullscreen(None);
+        }
+    }
+
     fn keyboard(&mut self, event: &KeyEvent) {
         if event.state != ElementState::Pressed {
             return;
@@ -290,7 +346,26 @@ impl App {
                 }
                 return;
             }
-            Key::Named(NamedKey::Escape) => return self.set_focus(None),
+            Key::Named(NamedKey::Escape) => {
+                if self.focused.is_some() {
+                    self.set_focus(None);
+                } else {
+                    self.leave_fullscreen();
+                }
+                return;
+            }
+            // Browsers use F11 for their own fullscreen.
+            #[cfg(not(target_arch = "wasm32"))]
+            Key::Named(NamedKey::F11) => return self.toggle_fullscreen(),
+            Key::Character(c)
+                if c.eq_ignore_ascii_case("f")
+                    && !event.repeat
+                    && !(self.modifiers.control_key()
+                        || self.modifiers.alt_key()
+                        || self.modifiers.super_key()) =>
+            {
+                return self.toggle_fullscreen();
+            }
             Key::Named(
                 NamedKey::ArrowDown | NamedKey::ArrowRight | NamedKey::PageDown | NamedKey::Space,
             ) => self.timeline.step(1),
@@ -324,10 +399,11 @@ impl App {
                 }
             }
             TouchPhase::Ended => {
-                if self.touch.take().is_some_and(|touch| touch.tap)
-                    && let Some(group) = self.group_at(location)
-                {
-                    self.activate(group);
+                if self.touch.take().is_some_and(|touch| touch.tap) {
+                    match self.group_at(location) {
+                        Some(group) => self.activate(group),
+                        None => self.press_empty(location),
+                    }
                 }
             }
             TouchPhase::Cancelled => self.touch = None,
@@ -424,7 +500,14 @@ impl ApplicationHandler<AppEvent> for App {
                 button: MouseButton::Left,
                 ..
             } => match state {
-                ElementState::Pressed => self.pressed = self.hovered,
+                ElementState::Pressed => {
+                    self.pressed = self.hovered;
+                    if self.hovered.is_none()
+                        && let Some(cursor) = self.cursor
+                    {
+                        self.press_empty(cursor);
+                    }
+                }
                 ElementState::Released => {
                     if let Some(group) = self.hovered
                         && self.pressed.take() == Some(group)
@@ -452,4 +535,28 @@ fn window_attributes(title: &str) -> winit::window::WindowAttributes {
     Window::default_attributes()
         .with_title(title)
         .with_canvas(crate::web::canvas())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn double_press_needs_two_quick_nearby_presses() {
+        let t0 = Instant::now();
+        let at = |x| PhysicalPosition::new(x, 100.0);
+        let first = (t0, at(100.0));
+        assert!(is_double_press(
+            first,
+            (t0 + Duration::from_millis(250), at(110.0))
+        ));
+        assert!(!is_double_press(
+            first,
+            (t0 + Duration::from_millis(600), at(100.0))
+        ));
+        assert!(!is_double_press(
+            first,
+            (t0 + Duration::from_millis(250), at(200.0))
+        ));
+    }
 }
