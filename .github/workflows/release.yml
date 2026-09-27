@@ -1,7 +1,8 @@
 name: Release
 
 # Push a tag like `v0.1.0` to test and build the native apps (via the shared
-# native.yml, same as CI) and attach them, plus the PDF, to a GitHub Release.
+# native.yml, same as CI) and attach them, each bundled with the PDF, plus the
+# PDF itself to a GitHub Release.
 # The binaries are unsigned, so Windows SmartScreen and macOS Gatekeeper will
 # warn on first launch.
 on:
@@ -49,6 +50,22 @@ jobs:
           path: artifacts
           merge-multiple: true
           skip-decompress: true
+      # The app's "PDF" button opens the PDF next to the executable (falling
+      # back to the hosted copy), so ship it inside each archive too. The PDF
+      # also stays a separate release asset.
+      - name: Add the PDF to the native archives
+        working-directory: artifacts
+        run: |
+          pdf=Harald_Reingruber_resume.pdf
+          for archive in resume-3d-*.zip; do
+            zip -j "$archive" "$pdf"
+          done
+          for archive in resume-3d-*.tar.gz; do
+            gunzip "$archive"
+            tar -rf "${archive%.gz}" "$pdf"
+            gzip "${archive%.gz}"
+          done
+          ls -l
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*

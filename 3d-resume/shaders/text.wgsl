@@ -5,13 +5,19 @@ struct Globals {
     camera_pos: vec4<f32>,
     // Camera distances: near fade start/end, far fade start/end.
     fade: vec4<f32>,
-    // x: MSDF distance range in atlas pixels.
+    // x: MSDF distance range in atlas pixels, y: 1 = fade by camera distance.
     params: vec4<f32>,
+}
+
+struct Groups {
+    // x: hover highlight (0..1) per group; group 0 is never highlighted.
+    highlight: array<vec4<f32>, 64>,
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var atlas: texture_2d<f32>;
 @group(0) @binding(2) var atlas_sampler: sampler;
+@group(0) @binding(3) var<uniform> groups: Groups;
 
 struct Glyph {
     // World-space quad: x0, y0 (bottom), x1, y1 (top).
@@ -20,6 +26,7 @@ struct Glyph {
     @location(1) uv: vec4<f32>,
     @location(2) color: vec4<f32>,
     @location(3) z: f32,
+    @location(4) group: u32,
 }
 
 struct VertexOutput {
@@ -37,7 +44,8 @@ fn vs_main(@builtin(vertex_index) index: u32, glyph: Glyph) -> VertexOutput {
     var out: VertexOutput;
     out.clip = globals.view_proj * vec4<f32>(world, 1.0);
     out.uv = vec2<f32>(mix(glyph.uv.x, glyph.uv.z, corner.x), mix(glyph.uv.w, glyph.uv.y, corner.y));
-    out.color = glyph.color;
+    let highlight = groups.highlight[min(glyph.group, 63u)].x;
+    out.color = vec4<f32>(mix(glyph.color.rgb, vec3<f32>(1.0), highlight * 0.35), glyph.color.a);
     out.world = world;
     return out;
 }
@@ -55,10 +63,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let screen_px_range = max(0.5 * dot(unit_range, screen_texture_size), 1.0);
     let coverage = clamp(screen_px_range * (distance_sample - 0.5) + 0.5, 0.0, 1.0);
 
-    let camera_distance = distance(in.world, globals.camera_pos.xyz);
-    let near = smoothstep(globals.fade.x, globals.fade.y, camera_distance);
-    let far = 1.0 - smoothstep(globals.fade.z, globals.fade.w, camera_distance);
-    let alpha = in.color.a * coverage * near * far;
+    var fade = 1.0;
+    if globals.params.y > 0.5 {
+        let camera_distance = distance(in.world, globals.camera_pos.xyz);
+        let near = smoothstep(globals.fade.x, globals.fade.y, camera_distance);
+        let far = 1.0 - smoothstep(globals.fade.z, globals.fade.w, camera_distance);
+        fade = near * far;
+    }
+    let alpha = in.color.a * coverage * fade;
     if alpha < 0.002 {
         discard;
     }

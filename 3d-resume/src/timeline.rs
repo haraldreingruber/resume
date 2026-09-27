@@ -5,6 +5,8 @@ pub struct Timeline {
     position: f32,
     target: f32,
     last: f32,
+    /// Reduced motion: jump to the target instead of easing towards it.
+    instant: bool,
 }
 
 /// Higher is snappier; 1/s.
@@ -24,7 +26,12 @@ impl Timeline {
             position: start,
             target: start,
             last,
+            instant: false,
         }
+    }
+
+    pub fn set_instant(&mut self, instant: bool) {
+        self.instant = instant;
     }
 
     pub fn position(&self) -> f32 {
@@ -53,7 +60,7 @@ impl Timeline {
     /// Advances the animation; returns whether it is still moving.
     pub fn update(&mut self, dt: f32) -> bool {
         let difference = self.target - self.position;
-        if difference.abs() < 1e-4 {
+        if self.instant || difference.abs() < 1e-4 {
             self.position = self.target;
             return false;
         }
@@ -76,6 +83,15 @@ mod tests {
         assert!(!timeline.update(1.0 / 60.0));
         timeline.step(-1);
         while timeline.update(1.0 / 60.0) {}
+        assert_eq!(timeline.position(), 1.0);
+    }
+
+    #[test]
+    fn reduced_motion_jumps_without_easing() {
+        let mut timeline = Timeline::new(5);
+        timeline.set_instant(true);
+        timeline.step(1);
+        assert!(!timeline.update(1.0 / 60.0));
         assert_eq!(timeline.position(), 1.0);
     }
 }
