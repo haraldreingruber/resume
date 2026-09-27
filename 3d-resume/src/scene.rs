@@ -37,6 +37,9 @@ pub const FAR_FADE: (f32, f32) = (1.8, 4.5);
 
 /// Hover groups are indices into a 64-entry uniform array; 0 means none.
 pub const MAX_GROUPS: usize = 64;
+/// The group of the name on the intro: reserved (never a link), so the
+/// renderer can fade the crisp title while the particles form it.
+pub const TITLE_GROUP: u32 = MAX_GROUPS as u32 - 1;
 
 const NAME: [f32; 4] = rgb(0xF0F4F8);
 const BODY: [f32; 4] = rgb(0xC9D4DE);
@@ -65,6 +68,34 @@ pub struct Scene {
     hits: Vec<Hit>,
     /// `actions[group - 1]` is what clicking hover group `group` does.
     actions: Vec<Action>,
+    pub title: Title,
+}
+
+/// The name on the intro, which the particles form.
+pub struct Title {
+    pub glyphs: Vec<GlyphInstance>,
+    /// x0, y0, x1, y1 around the glyphs, in the plane z = `z`.
+    pub bounds: [f32; 4],
+    pub z: f32,
+}
+
+impl Title {
+    fn new(glyphs: Vec<GlyphInstance>) -> Self {
+        let bounds = glyphs.iter().fold(
+            [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+            |[x0, y0, x1, y1], g| {
+                let [gx0, gy0, gx1, gy1] = g.rect;
+                [x0.min(gx0), y0.min(gy0), x1.max(gx1), y1.max(gy1)]
+            },
+        );
+        let z = glyphs.first().map_or(0.0, |g| g.z);
+        Self { glyphs, bounds, z }
+    }
+
+    pub fn center(&self) -> Vec3 {
+        let [x0, y0, x1, y1] = self.bounds;
+        Vec3::new((x0 + x1) / 2.0, (y0 + y1) / 2.0, self.z)
+    }
 }
 
 struct Station {
@@ -212,6 +243,14 @@ impl Scene {
         blocks.push(builder.take(|b| b.outro(resume, stations[count - 1].anchor)));
 
         let points: Vec<Vec3> = stations.iter().map(|s| s.anchor).collect();
+        let title = Title::new(
+            blocks[0]
+                .glyphs
+                .iter()
+                .filter(|g| g.group == TITLE_GROUP)
+                .copied()
+                .collect(),
+        );
         let mut glyphs = Vec::new();
         let mut shapes = Vec::new();
         for (i, block) in blocks.into_iter().enumerate().rev() {
@@ -227,6 +266,7 @@ impl Scene {
             shapes,
             hits: builder.hits,
             actions: builder.actions,
+            title,
         }
     }
 
@@ -290,30 +330,38 @@ impl Scene {
     /// The hover group of the nearest link under `ndc` (-1..1, y up), among
     /// stations that are in focus (not faded out).
     pub fn pick(&self, camera: &Camera, ndc: Vec2) -> Option<u32> {
-        let inverse = camera.view_proj.inverse();
-        let origin = inverse.project_point3(ndc.extend(0.0));
-        let direction = inverse.project_point3(ndc.extend(1.0)) - origin;
-        if direction.z.abs() < 1e-6 {
-            return None;
-        }
         let visible = (camera.focus_distance + NEAR_FADE.1)..(camera.focus_distance + FAR_FADE.0);
         self.hits
             .iter()
             .filter_map(|hit| {
-                let t = (hit.z - origin.z) / direction.z;
-                let p = origin + direction * t;
+                let (t, p) = camera.ray_to_plane(ndc, hit.z)?;
                 let [x0, y0, x1, y1] = hit.rect;
                 let inside = (x0..=x1).contains(&p.x) && (y0..=y1).contains(&p.y);
-                (t > 0.0 && inside && visible.contains(&p.distance(camera.eye)))
-                    .then_some((t, hit.group))
+                (inside && visible.contains(&p.distance(camera.eye))).then_some((t, hit.group))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, group)| group)
     }
 }
 
+impl Camera {
+    /// Where the ray through `ndc` (-1..1, y up) meets the plane at `z`, and
+    /// the ray parameter there; `None` if the plane is behind the camera.
+    pub fn ray_to_plane(&self, ndc: Vec2, z: f32) -> Option<(f32, Vec3)> {
+        let inverse = self.view_proj.inverse();
+        let origin = inverse.project_point3(ndc.extend(0.0));
+        let direction = inverse.project_point3(ndc.extend(1.0)) - origin;
+        if direction.z.abs() < 1e-6 {
+            return None;
+        }
+        let t = (z - origin.z) / direction.z;
+        (t > 0.0).then(|| (t, origin + direction * t))
+    }
+}
+
 fn add_action(actions: &mut Vec<Action>, action: Action) -> u32 {
-    if actions.len() + 1 >= MAX_GROUPS {
+    // Groups are 1-based; the last one is reserved for the title.
+    if actions.len() + 1 >= TITLE_GROUP as usize {
         log::warn!("out of hover groups; {action:?} won't be clickable");
         return 0;
     }
@@ -512,7 +560,9 @@ impl Builder {
     fn intro(&mut self, resume: &Resume, anchor: Vec3) {
         let basics = &resume.basics;
         let mut cursor = anchor + Vec3::new(0.0, 0.5, 0.0);
-        let name = TextStyle::new(Font::Bold, 0.42, NAME).centered();
+        let name = TextStyle::new(Font::Bold, 0.42, NAME)
+            .centered()
+            .group(TITLE_GROUP);
         self.text(&basics.name, name, 0.12, &mut cursor);
         let label = TextStyle::new(Font::Bold, 0.14, PALETTE[0])
             .centered()
@@ -757,6 +807,21 @@ mod tests {
             .map(|i| scene.links(i).len())
             .sum();
         assert_eq!(owned, scene.actions.len());
+    }
+
+    #[test]
+    fn the_title_has_a_reserved_group_without_an_action() {
+        let resume = crate::content::resume();
+        let mut scene = Scene::new(&resume);
+        let title = &scene.title;
+        let letters = resume.basics.name.chars().filter(|c| !c.is_whitespace());
+        assert_eq!(title.glyphs.len(), letters.count());
+        assert!(title.bounds[0] < title.bounds[2] && title.bounds[1] < title.bounds[3]);
+        assert_eq!(scene.action(TITLE_GROUP), None);
+        // Adding actions never hands out the title's group.
+        while let group @ 1.. = scene.add_action(Action::Pdf) {
+            assert!(group < TITLE_GROUP);
+        }
     }
 
     #[test]

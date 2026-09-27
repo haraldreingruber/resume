@@ -1,11 +1,11 @@
 //! winit application: creates the window, initializes the GPU (async on the
 //! web), turns input into timeline movement, link clicks, keyboard focus and
-//! fullscreen toggles, and renders on demand.
+//! fullscreen toggles, runs the particle intro, and renders on demand.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use glam::Vec2;
+use glam::{Vec2, Vec3};
 use web_time::Instant;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
@@ -18,6 +18,8 @@ use winit::window::{CursorIcon, Window, WindowId};
 
 use crate::focus::{self, Step};
 use crate::gpu::Gpu;
+use crate::intro::{self, Intro};
+use crate::particles;
 use crate::renderer::Renderer;
 use crate::scene::{Lens, Scene};
 use crate::timeline::Timeline;
@@ -69,6 +71,8 @@ pub struct App {
     /// The station in view, and the one last shown in the address bar.
     station: usize,
     shown_station: usize,
+    /// The particle intro's clock; `None` with reduced motion.
+    intro: Option<Intro>,
     /// Whether Tab / Shift+Tab leaves the canvas, read by the page's listener.
     #[cfg(target_arch = "wasm32")]
     tab_leaves: std::rc::Rc<std::cell::Cell<[bool; 2]>>,
@@ -79,6 +83,16 @@ struct State {
     renderer: Renderer,
     lens: Lens,
     ui: UiLayer,
+}
+
+/// A window position (physical pixels) in normalized device coordinates
+/// (-1..1, y up).
+fn ndc(position: PhysicalPosition<f64>, gpu: &Gpu) -> Vec2 {
+    let (width, height) = (gpu.config.width as f32, gpu.config.height as f32);
+    Vec2::new(
+        2.0 * position.x as f32 / width - 1.0,
+        1.0 - 2.0 * position.y as f32 / height,
+    )
 }
 
 /// When and where a click or tap happened.
@@ -127,6 +141,8 @@ impl App {
             modifiers: ModifiersState::empty(),
             station: start,
             shown_station: start,
+            // A deep link past the intro skips the assembly.
+            intro: (!options.reduced_motion).then(|| Intro::new(start != 0)),
             #[cfg(target_arch = "wasm32")]
             tab_leaves: Default::default(),
         };
@@ -147,6 +163,14 @@ impl App {
         let dt = (now - self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
         let moving = self.timeline.update(dt);
+        let position = self.timeline.position();
+        let pointer = self.intro_pointer();
+        let step = self
+            .intro
+            .as_mut()
+            .and_then(|intro| intro.advance(dt, intro::scatter(position), pointer));
+        let title_opacity = self.intro.as_ref().map_or(1.0, Intro::title_opacity);
+        let intro_active = self.intro.as_ref().is_some_and(Intro::active);
 
         let Some(State {
             gpu,
@@ -157,13 +181,17 @@ impl App {
         else {
             return;
         };
-        let camera = self.scene.camera(self.timeline.position(), lens);
+        if let Some(step) = &step {
+            renderer.step_particles(&gpu.context, step);
+        }
+        renderer.set_title_opacity(&gpu.context, title_opacity);
+        let camera = self.scene.camera(position, lens);
         let projection = UiLayer::projection(gpu.config.width as f32, gpu.config.height as f32);
         let presented = gpu.render(|ctx, view| renderer.draw(ctx, view, &camera, projection));
-        // Keep redrawing while the timeline is animating, and retry a frame
-        // the surface skipped (e.g. right after the first `configure()`) so a
-        // skipped frame is never the last one drawn.
-        if moving || !presented {
+        // Keep redrawing while the timeline or the particles move, and retry
+        // a frame the surface skipped (e.g. right after the first
+        // `configure()`) so a skipped frame is never the last one drawn.
+        if moving || intro_active || !presented {
             self.request_redraw();
         }
         self.follow_station(!moving);
@@ -239,13 +267,42 @@ impl App {
     }
 
     /// Uploads the hovered and focused groups and redraws.
-    fn update_groups(&self) {
-        if let Some(state) = &self.state {
+    fn update_groups(&mut self) {
+        if let Some(state) = &mut self.state {
             state
                 .renderer
                 .set_groups(&state.gpu.context, self.hovered, self.focused);
         }
         self.request_redraw();
+    }
+
+    /// The mouse on the title's plane, while it is near the title on the
+    /// intro (the particles make way for it).
+    fn intro_pointer(&self) -> Option<Vec3> {
+        let state = self.state.as_ref()?;
+        let cursor = self.cursor?;
+        let position = self.timeline.position();
+        if intro::scatter(position) > 0.3 {
+            return None;
+        }
+        let camera = self.scene.camera(position, &state.lens);
+        let title = &self.scene.title;
+        let (_, point) = camera.ray_to_plane(ndc(cursor, &state.gpu), title.z)?;
+        let [x0, y0, x1, y1] = title.bounds;
+        let r = particles::POINTER_RADIUS;
+        let near = (x0 - r..=x1 + r).contains(&point.x) && (y0 - r..=y1 + r).contains(&point.y);
+        near.then_some(point)
+    }
+
+    /// Redraws when the mouse moved the particles' pointer, so they react.
+    fn wake_intro(&self) {
+        if self
+            .intro
+            .as_ref()
+            .is_some_and(|intro| intro.pointer() != self.intro_pointer())
+        {
+            self.request_redraw();
+        }
     }
 
     /// Rebuilds size-dependent state: camera lens and screen-space buttons.
@@ -261,15 +318,11 @@ impl App {
     /// links in the scene.
     fn group_at(&self, position: PhysicalPosition<f64>) -> Option<u32> {
         let state = self.state.as_ref()?;
-        let (width, height) = (
-            state.gpu.config.width as f32,
-            state.gpu.config.height as f32,
-        );
+        let height = state.gpu.config.height as f32;
         let (x, y) = (position.x as f32, position.y as f32);
         state.ui.pick(x, height - y).or_else(|| {
-            let ndc = Vec2::new(2.0 * x / width - 1.0, 1.0 - 2.0 * y / height);
             let camera = self.scene.camera(self.timeline.position(), &state.lens);
-            self.scene.pick(&camera, ndc)
+            self.scene.pick(&camera, ndc(position, &state.gpu))
         })
     }
 
@@ -442,7 +495,7 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::GpuReady(Ok(gpu)) => {
-                let renderer = Renderer::new(&gpu.context, &self.scene);
+                let renderer = Renderer::new(&gpu.context, &self.scene, self.intro.is_some());
                 self.state = Some(State {
                     lens: Scene::lens(gpu.aspect()),
                     ui: UiLayer::default(),
@@ -490,10 +543,12 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = Some(position);
                 self.update_hover();
+                self.wake_intro();
             }
             WindowEvent::CursorLeft { .. } => {
                 self.cursor = None;
                 self.update_hover();
+                self.wake_intro();
             }
             WindowEvent::MouseInput {
                 state,

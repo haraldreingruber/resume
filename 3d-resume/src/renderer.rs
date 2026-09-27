@@ -1,13 +1,16 @@
-//! Draws a frame: gradient background, the scene's shapes and MSDF glyphs,
-//! then the screen-space layer (native buttons) on top. Draws into any
-//! texture view: the window surface or an offscreen screenshot target.
+//! Draws a frame: gradient background, the scene's shapes, the intro
+//! particles and the MSDF glyphs, then the screen-space layer (native
+//! buttons) on top. Draws into any texture view: the window surface or an
+//! offscreen screenshot target.
 
 use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 use wgpu::util::DeviceExt;
 
 use crate::gpu::Context;
-use crate::scene::{Camera, FAR_FADE, MAX_GROUPS, NEAR_FADE, Scene};
+use crate::intro::Step;
+use crate::particles::Particles;
+use crate::scene::{Camera, FAR_FADE, MAX_GROUPS, NEAR_FADE, Scene, TITLE_GROUP};
 use crate::shapes::ShapeInstance;
 use crate::text::{self, GlyphInstance};
 use crate::ui::UiLayer;
@@ -60,16 +63,29 @@ pub struct Renderer {
     background: wgpu::RenderPipeline,
     text: wgpu::RenderPipeline,
     shapes: wgpu::RenderPipeline,
-    /// Per hover group: `x` = highlight, `y` = keyboard focus (focus ring).
+    /// Per hover group: `x` = highlight, `y` = keyboard focus (focus ring),
+    /// `z` = fade-out (the title while the particles form it).
     groups: wgpu::Buffer,
+    group_state: GroupState,
     world: Layer,
     ui: Layer,
+    /// The intro particles; `None` with reduced motion.
+    particles: Option<Particles>,
+}
+
+/// What `groups` holds.
+struct GroupState {
+    hovered: Option<u32>,
+    focused: Option<u32>,
+    title_opacity: f32,
 }
 
 impl Renderer {
-    pub fn new(ctx: &Context, scene: &Scene) -> Self {
+    /// `particles`: whether to set up the intro particles.
+    pub fn new(ctx: &Context, scene: &Scene, particles: bool) -> Self {
         let device = &ctx.device;
-        let atlas = atlas_texture(ctx).create_view(&Default::default());
+        let atlas_pixels = text::atlas_rgba();
+        let atlas = atlas_texture(ctx, &atlas_pixels).create_view(&Default::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("atlas"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -212,13 +228,23 @@ impl Renderer {
             cache: None,
         });
 
+        let particles = particles
+            .then(|| Particles::new(ctx, &layout, &scene.title, &atlas_pixels))
+            .flatten();
+
         Self {
             background,
             text,
             shapes,
             groups,
+            group_state: GroupState {
+                hovered: None,
+                focused: None,
+                title_opacity: 1.0,
+            },
             world,
             ui,
+            particles,
         }
     }
 
@@ -230,7 +256,26 @@ impl Renderer {
 
     /// Highlights the hovered and the keyboard-focused group (a link or
     /// button) and shows the focused one's focus ring.
-    pub fn set_groups(&self, ctx: &Context, hovered: Option<u32>, focused: Option<u32>) {
+    pub fn set_groups(&mut self, ctx: &Context, hovered: Option<u32>, focused: Option<u32>) {
+        self.group_state.hovered = hovered;
+        self.group_state.focused = focused;
+        self.write_groups(ctx);
+    }
+
+    /// Fades the crisp title on the intro (while the particles form it).
+    pub fn set_title_opacity(&mut self, ctx: &Context, opacity: f32) {
+        if opacity != self.group_state.title_opacity {
+            self.group_state.title_opacity = opacity;
+            self.write_groups(ctx);
+        }
+    }
+
+    fn write_groups(&self, ctx: &Context) {
+        let GroupState {
+            hovered,
+            focused,
+            title_opacity,
+        } = self.group_state;
         let mut state = [[0.0f32; 4]; MAX_GROUPS];
         for (group, focus) in [(hovered, 0.0), (focused, 1.0)] {
             if let Some(entry) = group
@@ -241,8 +286,16 @@ impl Renderer {
                 entry[1] = f32::max(entry[1], focus);
             }
         }
+        state[TITLE_GROUP as usize][2] = 1.0 - title_opacity;
         ctx.queue
             .write_buffer(&self.groups, 0, bytemuck::cast_slice(&state));
+    }
+
+    /// Runs one frame of the intro particles' simulation.
+    pub fn step_particles(&mut self, ctx: &Context, step: &Step) {
+        if let Some(particles) = &mut self.particles {
+            particles.step(ctx, step);
+        }
     }
 
     /// Draws a frame into `target` (a view in `ctx.view_format`).
@@ -296,10 +349,15 @@ impl Renderer {
             pass.set_pipeline(&self.background);
             pass.draw(0..3, 0..1);
 
-            for layer in [&self.world, &self.ui] {
+            for (layer, world) in [(&self.world, true), (&self.ui, false)] {
                 pass.set_bind_group(0, &layer.bind_group, &[]);
                 pass.set_pipeline(&self.shapes);
                 layer.shapes.draw(&mut pass);
+                // Under the text, so the settled particles hide behind the
+                // crisp title.
+                if world && let Some(particles) = &self.particles {
+                    particles.draw(&mut pass);
+                }
                 pass.set_pipeline(&self.text);
                 layer.glyphs.draw(&mut pass);
             }
@@ -352,17 +410,9 @@ fn instanced_pipeline(
         })
 }
 
-/// Uploads the baked MSDF atlas (PNG, RGBA8, linear data).
-fn atlas_texture(ctx: &Context) -> wgpu::Texture {
-    let decoder = png::Decoder::new(std::io::Cursor::new(text::ATLAS_PNG));
-    let mut reader = decoder.read_info().expect("baked atlas is a valid PNG");
-    let mut pixels = vec![0; reader.output_buffer_size().expect("atlas size")];
-    let info = reader.next_frame(&mut pixels).expect("decode atlas");
+/// Uploads the baked MSDF atlas (RGBA8, linear data).
+fn atlas_texture(ctx: &Context, pixels: &[u8]) -> wgpu::Texture {
     let [width, height] = text::ATLAS_SIZE;
-    assert_eq!(
-        (info.width, info.height, info.color_type),
-        (width, height, png::ColorType::Rgba)
-    );
 
     ctx.device.create_texture_with_data(
         &ctx.queue,
@@ -381,6 +431,6 @@ fn atlas_texture(ctx: &Context) -> wgpu::Texture {
             view_formats: &[],
         },
         wgpu::util::TextureDataOrder::LayerMajor,
-        &pixels,
+        pixels,
     )
 }

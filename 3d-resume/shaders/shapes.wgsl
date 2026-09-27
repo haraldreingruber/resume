@@ -12,7 +12,8 @@ struct Globals {
 
 struct Groups {
     // Per group (group 0 is never highlighted): x = highlight (0..1),
-    // y = keyboard focus (shows the group's focus rings).
+    // y = keyboard focus (shows the group's focus rings), z = fade-out
+    // (1 = hidden).
     state: array<vec4<f32>, 64>,
 }
 
@@ -55,7 +56,7 @@ fn vs_main(@builtin(vertex_index) index: u32, shape: Shape) -> VertexOutput {
     let world = vec3<f32>(center + local, shape.z);
 
     let state = groups.state[min(shape.group & ~FOCUS_RING, 63u)];
-    var alpha = shape.color.a;
+    var alpha = shape.color.a * (1.0 - state.z);
     if (shape.group & FOCUS_RING) != 0u {
         alpha *= state.y;
     }
