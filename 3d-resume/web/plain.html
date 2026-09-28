@@ -87,8 +87,13 @@
   .tags { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 1rem; padding: 0; list-style: none; }
   .tags li { padding: 0.15rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.92rem; }
   h3.group { margin: 0.8rem 0 0; font-size: 0.95rem; }
+  footer { max-width: 64rem; margin: -2rem auto 0; padding: 0 1rem 3rem; }
+  footer details { padding-top: 1rem; border-top: 1px solid var(--border); }
+  footer summary { cursor: pointer; color: var(--heading); font-weight: 700; }
+  footer h3 { margin: 1rem 0 0.2rem; font-size: 1rem; }
+  footer p { margin: 0.2rem 0 0; }
   @media print {
-    .actions, .notice { display: none !important; }
+    .actions, .notice, footer { display: none !important; }
     main { padding: 0; }
   }
 </style>
@@ -276,6 +281,16 @@
     </div>
   </div>
 </main>
+<footer>
+  <details id="about">
+    <summary>How this resume is built</summary>
+    <h3>Platforms &amp; backends</h3>
+    <p>One Rust codebase, drawn with wgpu: WebAssembly on WebGPU in the browser; DirectX 12, Metal or Vulkan in the Windows, macOS and Linux apps; Vulkan or OpenGL ES on Android, and Metal on iOS.</p>
+    <h3>Rendering techniques</h3>
+    <p>Text comes from multi-channel signed distance fields (MSDF) baked at build time, so it stays sharp at any distance. Cards, chips and dots are instanced SDF shapes, and the skill map&#x27;s edges instanced line segments. A compute shader moves the intro&#x27;s 16,384 particles. Frames are drawn only while something moves: at rest, the GPU is idle.</p>
+    <p><a href="https:&#x2f;&#x2f;github.com&#x2f;haraldreingruber&#x2f;resume">Source code on GitHub</a></p>
+  </details>
+</footer>
 <script>
   // index.html redirects here with ?no-webgpu when WebGPU is unavailable.
   if (new URLSearchParams(location.search).has("no-webgpu")) {

@@ -8,6 +8,7 @@
 //! Without `load` only the domain types are compiled, so the wasm runtime can
 //! deserialize a pre-baked [`Resume`] without shipping a YAML or Markdown parser.
 
+pub mod about;
 mod domain;
 #[cfg(feature = "load")]
 mod load;

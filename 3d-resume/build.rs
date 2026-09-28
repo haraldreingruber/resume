@@ -51,9 +51,10 @@ fn main() {
     bake_atlas(&manifest, &out, &chars);
 }
 
-/// Every character the normalized resume content can display, plus printable
-/// ASCII and typographic characters the app hardcodes for UI (not sourced
-/// from the resume, e.g. the path's "•" in scene.rs).
+/// Every character the normalized resume content and the About panel can
+/// display, plus printable ASCII and typographic characters the app
+/// hardcodes for UI (not sourced from the resume, e.g. the path's "•" in
+/// scene.rs).
 ///
 /// Uses `Resume::all_text()` (every field, exhaustively) rather than the raw
 /// YAML, so characters produced only by Markdown/entity normalization --
@@ -62,6 +63,7 @@ fn charset(resume: &Resume) -> BTreeSet<char> {
     resume
         .all_text()
         .chars()
+        .chain(resume_model::about::ABOUT.texts().flat_map(str::chars))
         .chain(' '..='~')
         .chain(EXTRA_CHARS.chars())
         .filter(|c| !c.is_control())

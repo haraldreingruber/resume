@@ -2,6 +2,7 @@
 //! app (DX12 / Vulkan / Metal via wgpu) and the phone builds (Android via
 //! `android_main`, iOS through the regular program).
 
+mod about;
 #[cfg(target_os = "android")]
 mod android;
 mod app;
@@ -113,9 +114,9 @@ fn options() -> app::Options {
 }
 
 /// `--screenshots <dir> [--station <id|index> | --position <t>] [--time <s>]
-/// [--size 1280x800] [--scale <n>] [--focus <n>]`: renders the stations and
-/// two frames of the particle intro (or one frame) headlessly to PNG files
-/// and exits.
+/// [--size 1280x800] [--scale <n>] [--focus <n>] [--about]`: renders the
+/// stations, two frames of the particle intro and the About panel (or one
+/// frame) headlessly to PNG files and exits.
 #[cfg(not(target_arch = "wasm32"))]
 fn screenshots(dir: String) -> Result<(), String> {
     let size = match arg("--size") {
@@ -131,6 +132,7 @@ fn screenshots(dir: String) -> Result<(), String> {
         size,
         scale: number("--scale")?.unwrap_or(1.0),
         focus: number("--focus")?,
+        about: std::env::args().any(|a| a == "--about"),
     })
 }
 

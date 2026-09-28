@@ -89,26 +89,63 @@ pub fn release_tab_at_edges(leaves: Rc<Cell<[bool; 2]>>) {
     listener.forget();
 }
 
-/// Makes the page's Skills link (`#skills-link`) fly to the skill map in
-/// place, instead of reloading the page at `?station=skills` (its `href`,
-/// the fallback), and hands keyboard focus back to the canvas.
-pub fn on_skills_link(proxy: EventLoopProxy<AppEvent>) {
-    let Some(link) = web_sys::window()
+/// Hands the page nav's clicks to the app:
+/// - the Skills link (`#skills-link`) flies to the skill map in place,
+///   instead of reloading the page at `?station=skills` (its `href`, the
+///   fallback);
+/// - the About button (`#about-button`) opens or closes the About panel.
+///
+/// Both hand keyboard focus back to the canvas, where Tab reaches the
+/// panel's link and Esc closes it.
+pub fn forward_nav_clicks(proxy: EventLoopProxy<AppEvent>) {
+    forward_clicks("skills-link", proxy.clone(), || AppEvent::ToggleSkills);
+    forward_clicks("about-button", proxy, || AppEvent::ToggleAbout);
+}
+
+fn forward_clicks(id: &str, proxy: EventLoopProxy<AppEvent>, event: fn() -> AppEvent) {
+    let Some(element) = web_sys::window()
         .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id("skills-link"))
+        .and_then(|document| document.get_element_by_id(id))
     else {
         return;
     };
-    let listener = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
-        event.prevent_default();
-        let _ = proxy.send_event(AppEvent::ToggleSkills);
+    let listener = Closure::<dyn FnMut(web_sys::Event)>::new(move |click: web_sys::Event| {
+        click.prevent_default();
+        let _ = proxy.send_event(event());
         if let Some(canvas) = canvas() {
             let _ = canvas.focus();
         }
     });
-    let _ = link.add_event_listener_with_callback("click", listener.as_ref().unchecked_ref());
+    let _ = element.add_event_listener_with_callback("click", listener.as_ref().unchecked_ref());
     // Lives as long as the page.
     listener.forget();
+}
+
+/// How far (physical pixels) the page's nav reaches up from the bottom of
+/// the window, so the About panel can sit above it.
+pub fn nav_height() -> f32 {
+    let Some(window) = web_sys::window() else {
+        return 0.0;
+    };
+    let top = window
+        .document()
+        .and_then(|document| document.query_selector("nav").ok().flatten())
+        .map(|nav| nav.get_bounding_client_rect().top());
+    let height = window.inner_height().ok().and_then(|h| h.as_f64());
+    match (top, height) {
+        (Some(top), Some(height)) => ((height - top) * window.device_pixel_ratio()).max(0.0) as f32,
+        _ => 0.0,
+    }
+}
+
+/// Keeps the About button's `aria-expanded` in step with the panel.
+pub fn show_about_expanded(open: bool) {
+    if let Some(button) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id("about-button"))
+    {
+        let _ = button.set_attribute("aria-expanded", if open { "true" } else { "false" });
+    }
 }
 
 /// Enters or leaves fullscreen for the whole page, so the HTML nav stays
