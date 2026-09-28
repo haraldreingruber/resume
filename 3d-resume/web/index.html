@@ -30,6 +30,8 @@
     color: #c9d4de; background: rgba(2, 6, 11, 0.6); text-decoration: none;
   }
   nav a:hover, nav a:focus-visible { border-color: #6db3e8; color: #fff; }
+  /* Touch screens: links at least 44 px tall. */
+  @media (pointer: coarse) { nav a { padding: 14px 16px; } }
   .skip { position: absolute; left: -9999px; }
   .skip:focus { left: 16px; top: 16px; color: #fff; }
 </style>

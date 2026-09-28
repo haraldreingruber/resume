@@ -12,7 +12,7 @@ use crate::focus;
 use crate::gpu::Context;
 use crate::intro::{self, Intro};
 use crate::renderer::Renderer;
-use crate::scene::Scene;
+use crate::scene::{Metrics, Scene};
 use crate::ui::{self, UiLayer};
 
 /// The native window's default (logical) size.
@@ -38,6 +38,8 @@ pub struct Request {
     /// the particles come to rest; implies the intro if nothing else is set.
     pub time: Option<f32>,
     pub size: [u32; 2],
+    /// Device pixels per logical pixel, e.g. 3 on a phone (sizes the buttons).
+    pub scale: f32,
     /// Gives keyboard focus to the n-th focus target (shows its focus ring).
     pub focus: Option<usize>,
 }
@@ -129,17 +131,20 @@ fn simulate(
 
 /// Writes one PNG per frame into `request.dir`.
 pub fn run(request: &Request) -> Result<(), String> {
+    let [width, height] = request.size;
+    let aspect = width as f32 / height as f32;
     let resume = crate::content::resume();
-    let mut scene = Scene::new(&resume);
+    // The layout the app would pick for this screen shape.
+    let mut scene = Scene::with_metrics(&resume, Metrics::for_aspect(aspect));
     let buttons = ui::native_buttons(&mut scene);
     let frames = frames(&scene, request)?;
 
     let ctx = pollster::block_on(context())?;
-    let [width, height] = request.size;
     let mut renderer = Renderer::new(&ctx, &scene, true);
     let mut intro = Intro::new(false);
-    renderer.set_ui(&ctx, &UiLayer::buttons(width as f32, 1.0, &buttons));
-    let lens = Scene::lens(width as f32 / height as f32);
+    let ui = UiLayer::buttons(width as f32, request.scale, &buttons);
+    renderer.set_ui(&ctx, &ui);
+    let lens = scene.lens(aspect);
     let projection = UiLayer::projection(width as f32, height as f32);
     let target = ctx.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("screenshot"),

@@ -52,6 +52,8 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -yq --no-install-recommends libvulkan1 mesa-vulkan-drivers
           target/release/resume-3d --screenshots screenshots
+          # A portrait phone (390x844 at 3x): the compact layout.
+          target/release/resume-3d --screenshots screenshots/phone --size 1170x2532 --scale 3
       # Also when a station came out blank, to see what went wrong.
       - name: Upload screenshots
         if: ${{ !cancelled() && inputs.screenshots && runner.os == 'Linux' }}

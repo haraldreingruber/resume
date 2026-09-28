@@ -18,22 +18,94 @@ use crate::text::{self, Font, GlyphInstance, Run, TextStyle, rgb, rgb_bytes};
 const SPACING: f32 = 6.0;
 /// Sideways offset of alternating stations.
 const SWAY: f32 = 0.9;
-/// Width of wrapped text blocks.
-const BLOCK_WIDTH: f32 = 3.2;
-/// Half-width the camera keeps in view, so narrow screens back off.
-const VIEW_HALF_WIDTH: f32 = 2.3;
-/// Width of the centered intro tagline.
-const TAGLINE_WIDTH: f32 = 4.4;
 const FOV_Y: f32 = 50.0_f32.to_radians();
-/// Height of the path dots below the stations: low enough that the path
-/// ahead stays below a station's text as it recedes.
-const FLOOR_Y: f32 = -2.4;
-/// Top of the year labels, just above the bottom of the screen.
-const YEAR_TOP_Y: f32 = -1.62;
-/// Half the width of the skill map (wider than a text station).
-const MAP_HALF_WIDTH: f32 = 2.2;
 /// How much a skill-map node not related to the active one fades out.
 pub const MAP_DIM: f32 = 0.7;
+
+/// Layout constants for a screen shape: `WIDE` for desktops, tablets and
+/// landscape, `COMPACT` for portrait phones (narrow blocks, larger text,
+/// taller stations).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Metrics {
+    /// Width of wrapped text blocks.
+    block_width: f32,
+    /// Half the width and height the camera keeps in view around a station
+    /// (screens too narrow or too short for it back off).
+    view_half_width: f32,
+    view_half_height: f32,
+    /// How far below a station's anchor the camera looks.
+    look_below: f32,
+    /// Wrap width of the centered intro name and tagline.
+    tagline_width: f32,
+    /// Size of the intro name (world units per em).
+    name_size: f32,
+    /// Multiplier for all other text sizes.
+    text_scale: f32,
+    /// Height of the path dots below the stations: low enough that the path
+    /// ahead stays below a station's text as it recedes.
+    floor_y: f32,
+    /// Top of the year labels, just above the bottom of the screen.
+    year_top_y: f32,
+    /// Half the width of the skill map, and how far below the anchor it
+    /// reaches.
+    map_half_width: f32,
+    map_depth: f32,
+    map: skillmap::Params,
+}
+
+pub const WIDE: Metrics = Metrics {
+    block_width: 3.2,
+    view_half_width: 2.3,
+    view_half_height: 1.68,
+    look_below: 0.9,
+    tagline_width: 4.4,
+    name_size: 0.42,
+    text_scale: 1.0,
+    floor_y: -2.4,
+    year_top_y: -1.62,
+    map_half_width: 2.2,
+    map_depth: 2.1,
+    map: skillmap::Params::WIDE,
+};
+
+pub const COMPACT: Metrics = Metrics {
+    block_width: 2.1,
+    view_half_width: 1.25,
+    view_half_height: 2.6,
+    look_below: 1.25,
+    tagline_width: 2.3,
+    name_size: 0.38,
+    text_scale: 1.12,
+    floor_y: -3.9,
+    year_top_y: -2.85,
+    map_half_width: 1.2,
+    map_depth: 3.0,
+    map: skillmap::Params::COMPACT,
+};
+
+impl Metrics {
+    /// Screens narrower than this (portrait phones) get `COMPACT`; tablets in
+    /// portrait still fit the wide layout.
+    const COMPACT_BELOW: f32 = 0.7;
+
+    pub fn for_aspect(aspect: f32) -> Self {
+        if aspect < Self::COMPACT_BELOW {
+            COMPACT
+        } else {
+            WIDE
+        }
+    }
+
+    fn size(&self, size: f32) -> f32 {
+        size * self.text_scale
+    }
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        WIDE
+    }
+}
 
 /// Content fades in/out relative to the focus distance: stations the camera
 /// passes fade out, the next one fades in as the camera approaches. Shared
@@ -109,6 +181,7 @@ pub struct Scene {
     /// Skill-map links as (entry node, skill node) hover groups.
     edges: Vec<(u32, u32)>,
     skills_station: usize,
+    metrics: Metrics,
 }
 
 /// The name on the intro, which the particles form.
@@ -243,7 +316,12 @@ fn timeline(resume: &Resume) -> Vec<Entry<'_>> {
 }
 
 impl Scene {
+    /// The scene in the wide layout.
     pub fn new(resume: &Resume) -> Self {
+        Self::with_metrics(resume, WIDE)
+    }
+
+    pub fn with_metrics(resume: &Resume, metrics: Metrics) -> Self {
         let entries = timeline(resume);
         // Intro, entries, skill map, outro.
         let count = entries.len() + 3;
@@ -270,7 +348,10 @@ impl Scene {
         // Build each station, then emit them far to near so that nearer
         // stations are drawn on top.
         let mut blocks = Vec::with_capacity(count);
-        let mut builder = Builder::default();
+        let mut builder = Builder {
+            m: metrics,
+            ..Builder::default()
+        };
         blocks.push(builder.take(|b| b.intro(resume, stations[0].anchor)));
         for (i, entry) in entries.iter().enumerate() {
             let station = &stations[i + 1];
@@ -308,7 +389,7 @@ impl Scene {
         let mut lines = Vec::new();
         for (i, block) in blocks.into_iter().enumerate().rev() {
             stations[i].links = block.links;
-            shapes.extend(path_dots(&points, i));
+            shapes.extend(path_dots(&points, i, metrics.floor_y));
             shapes.extend(block.shapes);
             glyphs.extend(block.glyphs);
             lines.extend(block.lines);
@@ -324,7 +405,12 @@ impl Scene {
             title,
             edges: builder.edges,
             skills_station,
+            metrics,
         }
+    }
+
+    pub fn metrics(&self) -> Metrics {
+        self.metrics
     }
 
     /// The station of the skill map.
@@ -386,19 +472,23 @@ impl Scene {
     }
 
     /// Camera parameters for an aspect ratio; recompute only on resize.
-    pub fn lens(aspect: f32) -> Lens {
-        // Back off on narrow screens so text blocks fit horizontally.
-        let half_fov_x = ((FOV_Y / 2.0).tan() * aspect).atan();
+    pub fn lens(&self, aspect: f32) -> Lens {
+        // Back off until a station's area fits both across and up and down.
+        let tan_half_y = (FOV_Y / 2.0).tan();
+        let m = &self.metrics;
         Lens {
             // wgpu uses DirectX-style clip space (depth 0..1).
             projection: glam::camera::rh::proj::directx::perspective(FOV_Y, aspect, 0.1, 100.0),
-            distance: (VIEW_HALF_WIDTH / half_fov_x.tan()).max(3.6),
+            distance: f32::max(
+                m.view_half_width / (tan_half_y * aspect),
+                m.view_half_height / tan_half_y,
+            ),
         }
     }
 
     /// Camera for timeline position `t`.
     pub fn camera(&self, t: f32, lens: &Lens) -> Camera {
-        let target = catmull_rom(&self.points, t) + Vec3::new(0.0, -0.9, 0.0);
+        let target = catmull_rom(&self.points, t) + Vec3::new(0.0, -self.metrics.look_below, 0.0);
         // The camera sways less than the stations for a calmer ride.
         let eye = Vec3::new(target.x * 0.6, target.y + 0.35, target.z + lens.distance);
         let view = glam::camera::rh::view::look_at_mat4(eye, target, Vec3::Y);
@@ -455,6 +545,7 @@ fn add_action(actions: &mut Vec<Action>, action: Action) -> u32 {
 /// groups) and skill-map edges accumulate over the whole scene.
 #[derive(Default)]
 struct Builder {
+    m: Metrics,
     glyphs: Vec<GlyphInstance>,
     shapes: Vec<ShapeInstance>,
     lines: Vec<LineInstance>,
@@ -474,6 +565,11 @@ impl Builder {
             lines: std::mem::take(&mut self.lines),
             links: first..self.actions.len() as u32 + 1,
         }
+    }
+
+    /// A text style with the layout's text scale applied to `size`.
+    fn style(&self, font: Font, size: f32, color: [f32; 4]) -> TextStyle {
+        TextStyle::new(font, self.m.size(size), color)
     }
 
     /// Lays out a text block at `cursor` and moves the cursor below it.
@@ -645,20 +741,23 @@ impl Builder {
     fn intro(&mut self, resume: &Resume, anchor: Vec3) {
         let basics = &resume.basics;
         let mut cursor = anchor + Vec3::new(0.0, 0.5, 0.0);
-        let name = TextStyle::new(Font::Bold, 0.42, NAME)
+        let name = TextStyle::new(Font::Bold, self.m.name_size, NAME)
             .centered()
+            .wrap(self.m.tagline_width)
             .group(TITLE_GROUP);
         self.text(&basics.name, name, 0.12, &mut cursor);
-        let label = TextStyle::new(Font::Bold, 0.14, PALETTE[0])
+        let label = self
+            .style(Font::Bold, 0.14, PALETTE[0])
             .centered()
-            .wrap(TAGLINE_WIDTH);
+            .wrap(self.m.tagline_width);
         self.text(&basics.label, label, 0.25, &mut cursor);
-        let summary = TextStyle::new(Font::Regular, 0.085, BODY)
+        let summary = self
+            .style(Font::Regular, 0.085, BODY)
             .centered()
-            .wrap(BLOCK_WIDTH)
+            .wrap(self.m.block_width)
             .line_spacing(1.15);
         self.rich(&basics.summary, summary, PALETTE[0], 0.35, &mut cursor);
-        let hint = TextStyle::new(Font::Regular, 0.07, MUTED).centered();
+        let hint = self.style(Font::Regular, 0.07, MUTED).centered();
         self.text(
             "Scroll, swipe or use the arrow keys to travel back in time",
             hint,
@@ -674,72 +773,86 @@ impl Builder {
     }
 
     fn job(&mut self, work: &Work, anchor: Vec3, accent: [f32; 4]) {
-        let mut cursor = anchor - Vec3::new(BLOCK_WIDTH / 2.0, 0.0, 0.0);
+        let mut cursor = anchor - Vec3::new(self.m.block_width / 2.0, 0.0, 0.0);
         let meta = Self::meta_line(&work.dates, work.location.as_deref());
         self.text(
             &meta,
-            TextStyle::new(Font::Regular, 0.075, MUTED),
+            self.style(Font::Regular, 0.075, MUTED),
             0.08,
             &mut cursor,
         );
-        let position = TextStyle::new(Font::Bold, 0.16, NAME).wrap(BLOCK_WIDTH);
+        let position = self.style(Font::Bold, 0.16, NAME).wrap(self.m.block_width);
         self.text(&work.position, position, 0.06, &mut cursor);
-        let organization = TextStyle::new(Font::Bold, 0.11, accent);
+        let organization = self.style(Font::Bold, 0.11, accent);
         self.text(&work.organization, organization, 0.18, &mut cursor);
         if let Some(summary) = &work.summary {
-            let style = TextStyle::new(Font::Regular, 0.08, BODY)
-                .wrap(BLOCK_WIDTH)
+            let style = self
+                .style(Font::Regular, 0.08, BODY)
+                .wrap(self.m.block_width)
                 .line_spacing(1.15);
             self.rich(summary, style, accent, 0.16, &mut cursor);
         }
-        self.chips(&work.skills, 0.06, accent, BLOCK_WIDTH, false, &mut cursor);
+        self.chips(
+            &work.skills,
+            self.m.size(0.06),
+            accent,
+            self.m.block_width,
+            false,
+            &mut cursor,
+        );
     }
 
     fn project(&mut self, project: &Project, anchor: Vec3, accent: [f32; 4]) {
-        let mut cursor = anchor - Vec3::new(BLOCK_WIDTH / 2.0, 0.0, 0.0);
+        let mut cursor = anchor - Vec3::new(self.m.block_width / 2.0, 0.0, 0.0);
         let meta = Self::meta_line(&project.dates, project.location.as_deref());
         self.text(
             &meta,
-            TextStyle::new(Font::Regular, 0.075, MUTED),
+            self.style(Font::Regular, 0.075, MUTED),
             0.08,
             &mut cursor,
         );
-        let heading = TextStyle::new(Font::Bold, 0.11, accent).wrap(BLOCK_WIDTH);
+        let heading = self
+            .style(Font::Bold, 0.11, accent)
+            .wrap(self.m.block_width);
         self.text(&project.heading(), heading, 0.08, &mut cursor);
-        let title = TextStyle::new(Font::Bold, 0.14, NAME).wrap(BLOCK_WIDTH);
+        let title = self.style(Font::Bold, 0.14, NAME).wrap(self.m.block_width);
         self.text(&format!("“{}”", project.title), title, 0.16, &mut cursor);
         if let Some(description) = &project.description {
-            let style = TextStyle::new(Font::Regular, 0.08, BODY)
-                .wrap(BLOCK_WIDTH)
+            let style = self
+                .style(Font::Regular, 0.08, BODY)
+                .wrap(self.m.block_width)
                 .line_spacing(1.15);
             self.rich(description, style, accent, 0.16, &mut cursor);
         }
         self.chips(
             &project.skills,
-            0.06,
+            self.m.size(0.06),
             accent,
-            BLOCK_WIDTH,
+            self.m.block_width,
             false,
             &mut cursor,
         );
     }
 
     fn education(&mut self, education: &Education, anchor: Vec3, accent: [f32; 4]) {
-        let mut cursor = anchor - Vec3::new(BLOCK_WIDTH / 2.0, 0.0, 0.0);
+        let mut cursor = anchor - Vec3::new(self.m.block_width / 2.0, 0.0, 0.0);
         let meta = Self::meta_line(&education.dates, education.location.as_deref());
         self.text(
             &meta,
-            TextStyle::new(Font::Regular, 0.075, MUTED),
+            self.style(Font::Regular, 0.075, MUTED),
             0.08,
             &mut cursor,
         );
-        let title = TextStyle::new(Font::Bold, 0.16, NAME).wrap(BLOCK_WIDTH);
+        let title = self.style(Font::Bold, 0.16, NAME).wrap(self.m.block_width);
         self.text(&education.title(), title, 0.06, &mut cursor);
-        let institution = TextStyle::new(Font::Bold, 0.11, accent).wrap(BLOCK_WIDTH);
+        let institution = self
+            .style(Font::Bold, 0.11, accent)
+            .wrap(self.m.block_width);
         self.text(&education.institution, institution, 0.18, &mut cursor);
         if let Some(courses) = education.courses_sentence() {
-            let style = TextStyle::new(Font::Regular, 0.08, BODY)
-                .wrap(BLOCK_WIDTH)
+            let style = self
+                .style(Font::Regular, 0.08, BODY)
+                .wrap(self.m.block_width)
                 .line_spacing(1.15);
             self.text(&courses, style, 0.0, &mut cursor);
         }
@@ -748,16 +861,21 @@ impl Builder {
     fn outro(&mut self, resume: &Resume, anchor: Vec3) {
         let accent = PALETTE[0];
         let mut cursor = anchor + Vec3::new(0.0, 0.3, 0.0);
-        let heading = |text| (text, TextStyle::new(Font::Bold, 0.16, NAME).centered());
-        let (text, style) = heading("Languages");
-        self.text(text, style, 0.14, &mut cursor);
+        let heading = self.style(Font::Bold, 0.16, NAME).centered();
+        self.text("Languages", heading, 0.14, &mut cursor);
         let languages: Vec<String> = resume.languages.iter().map(ToString::to_string).collect();
-        self.chips(&languages, 0.075, accent, BLOCK_WIDTH, true, &mut cursor);
+        self.chips(
+            &languages,
+            self.m.size(0.075),
+            accent,
+            self.m.block_width,
+            true,
+            &mut cursor,
+        );
         cursor.y -= 0.3;
-        let (text, style) = heading("Get in touch");
-        self.text(text, style, 0.16, &mut cursor);
+        self.text("Get in touch", heading, 0.16, &mut cursor);
 
-        let link_style = TextStyle::new(Font::Regular, 0.09, accent).centered();
+        let link_style = self.style(Font::Regular, 0.09, accent).centered();
         let basics = &resume.basics;
         let email = Action::Open(Link::Url(format!("mailto:{}", basics.email)));
         self.link(&basics.email, email, link_style, 0.1, &mut cursor);
@@ -771,7 +889,7 @@ impl Builder {
             );
         }
         cursor.y -= 0.25;
-        let hint = TextStyle::new(Font::Regular, 0.07, MUTED).centered();
+        let hint = self.style(Font::Regular, 0.07, MUTED).centered();
         self.text("Press Home to return to the start", hint, 0.0, &mut cursor);
     }
 
@@ -779,11 +897,13 @@ impl Builder {
     /// them (from `entries`, with their stations), linked by curves. Entries
     /// fly to their station when activated; skills pin their connections.
     fn skill_map(&mut self, resume: &Resume, entries: &[(usize, Entry)], anchor: Vec3) {
-        let (left, z) = (anchor.x - MAP_HALF_WIDTH, anchor.z);
+        let (left, z) = (anchor.x - self.m.map_half_width, anchor.z);
         let mut cursor = Vec3::new(left, anchor.y + 0.55, z);
-        let title = TextStyle::new(Font::Bold, 0.16, NAME);
+        let title = self.style(Font::Bold, 0.16, NAME);
         self.text("Skills", title, 0.04, &mut cursor);
-        let hint = TextStyle::new(Font::Regular, 0.065, MUTED);
+        let hint = self
+            .style(Font::Regular, 0.065, MUTED)
+            .wrap(2.0 * self.m.map_half_width);
         self.text(
             "Hover, tap or Tab through the map to see where each skill was used",
             hint,
@@ -816,11 +936,11 @@ impl Builder {
             .collect();
         let area = [
             left,
-            anchor.y - 2.1,
-            anchor.x + MAP_HALF_WIDTH,
+            anchor.y - self.m.map_depth,
+            anchor.x + self.m.map_half_width,
             cursor.y - 0.12,
         ];
-        let map = skillmap::layout(&map_entries, &groups, area);
+        let map = skillmap::layout(&map_entries, &groups, area, &self.m.map);
 
         // Groups in reading order: entries top to bottom, then the skills.
         let node_groups: Vec<u32> = map
@@ -892,14 +1012,14 @@ impl Builder {
 
     /// The entry's year on the floor below the station.
     fn year_label(&mut self, label: &str, anchor: Vec3) {
-        let style = TextStyle::new(Font::Bold, 0.14, PATH).centered();
-        let top = Vec3::new(anchor.x, YEAR_TOP_Y, anchor.z);
+        let style = self.style(Font::Bold, 0.14, PATH).centered();
+        let top = Vec3::new(anchor.x, self.m.year_top_y, anchor.z);
         text::layout(label, style, top, &mut self.glyphs);
     }
 }
 
 /// Dots along the path from station `i` towards the previous one, on the floor.
-fn path_dots(stations: &[Vec3], i: usize) -> Vec<ShapeInstance> {
+fn path_dots(stations: &[Vec3], i: usize, floor_y: f32) -> Vec<ShapeInstance> {
     const DOTS: usize = 14;
     if i == 0 {
         return Vec::new();
@@ -908,7 +1028,7 @@ fn path_dots(stations: &[Vec3], i: usize) -> Vec<ShapeInstance> {
     (2..DOTS - 1)
         .map(|d| {
             let p = catmull_rom(stations, i as f32 - d as f32 / DOTS as f32);
-            ShapeInstance::dot([p.x, FLOOR_Y], p.z, 0.035, PATH)
+            ShapeInstance::dot([p.x, floor_y], p.z, 0.035, PATH)
         })
         .collect()
 }
@@ -1056,6 +1176,75 @@ mod tests {
     }
 
     #[test]
+    fn phones_in_portrait_get_the_compact_layout() {
+        assert_eq!(Metrics::for_aspect(16.0 / 9.0), WIDE);
+        assert_eq!(Metrics::for_aspect(0.75), WIDE); // Tablet, portrait.
+        assert_eq!(Metrics::for_aspect(390.0 / 844.0), COMPACT);
+    }
+
+    /// Every station's text, dots and chips fit the part of the world the
+    /// camera keeps in view, in both layouts.
+    #[test]
+    fn stations_fit_the_view() {
+        let resume = crate::content::resume();
+        for metrics in [WIDE, COMPACT] {
+            let scene = Scene::with_metrics(&resume, metrics);
+            for (i, station) in scene.stations.iter().enumerate() {
+                let anchor = station.anchor;
+                let half_width = if i == scene.skills_station {
+                    metrics.map_half_width
+                } else {
+                    metrics.view_half_width
+                };
+                let center_y = anchor.y - metrics.look_below;
+                let inside = |[x0, y0, x1, y1]: [f32; 4]| {
+                    x0 >= anchor.x - half_width - 0.05
+                        && x1 <= anchor.x + half_width + 0.05
+                        && y0 >= center_y - metrics.view_half_height
+                        && y1 <= center_y + metrics.view_half_height
+                };
+                for glyph in scene.glyphs.iter().filter(|g| g.z == anchor.z) {
+                    assert!(
+                        inside(glyph.rect),
+                        "{} ({metrics:?}): {:?}",
+                        station.id,
+                        glyph.rect
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_compact_intro_wraps_the_name() {
+        let scene = Scene::with_metrics(&crate::content::resume(), COMPACT);
+        let lines: std::collections::BTreeSet<i32> = scene
+            .title
+            .glyphs
+            .iter()
+            .map(|g| (g.rect[3] * 100.0).round() as i32)
+            .collect();
+        assert!(lines.len() >= 2, "one line: {lines:?}");
+    }
+
+    #[test]
+    fn the_camera_fits_the_view_area_on_any_screen() {
+        let resume = crate::content::resume();
+        for (metrics, aspect) in [
+            (WIDE, 16.0 / 9.0),
+            (WIDE, 0.75),
+            (COMPACT, 0.46),
+            (COMPACT, 0.62),
+        ] {
+            let scene = Scene::with_metrics(&resume, metrics);
+            let lens = scene.lens(aspect);
+            let tan_half_y = (FOV_Y / 2.0).tan();
+            assert!(lens.distance * tan_half_y >= metrics.view_half_height - 1e-4);
+            assert!(lens.distance * tan_half_y * aspect >= metrics.view_half_width - 1e-4);
+        }
+    }
+
+    #[test]
     fn every_link_region_has_a_focus_ring() {
         let scene = Scene::new(&crate::content::resume());
         for hit in &scene.hits {
@@ -1098,7 +1287,7 @@ mod tests {
     fn picks_the_link_under_the_cursor_only_when_in_focus() {
         let resume = crate::content::resume();
         let scene = Scene::new(&resume);
-        let lens = Scene::lens(16.0 / 9.0);
+        let lens = scene.lens(16.0 / 9.0);
         let outro = scene.station_count() - 1;
         let camera = scene.camera(outro as f32, &lens);
         // Project the center of an outro link region to NDC and pick there.

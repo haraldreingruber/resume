@@ -77,6 +77,8 @@ pub struct Renderer {
     ui: Layer,
     /// The intro particles; `None` with reduced motion.
     particles: Option<Particles>,
+    /// Layout of the layers' bind groups (for re-creating the particles).
+    bind_layout: wgpu::BindGroupLayout,
 }
 
 /// What `groups` holds.
@@ -270,7 +272,22 @@ impl Renderer {
             world,
             ui,
             particles,
+            bind_layout: layout,
         }
+    }
+
+    /// Swaps in a rebuilt scene (the other layout, e.g. after rotating a
+    /// phone): its instances, and the particles' goals on the new title.
+    pub fn set_scene(&mut self, ctx: &Context, scene: &Scene) {
+        let device = &ctx.device;
+        self.world.glyphs = Instances::new(device, "glyphs", &scene.glyphs);
+        self.world.shapes = Instances::new(device, "shapes", &scene.shapes);
+        self.world.lines = Instances::new(device, "lines", &scene.lines);
+        if self.particles.is_some() {
+            self.particles =
+                Particles::new(ctx, &self.bind_layout, &scene.title, &text::atlas_rgba());
+        }
+        self.set_groups(ctx, None, None, None);
     }
 
     /// Replaces the screen-space layer (e.g. after a resize).

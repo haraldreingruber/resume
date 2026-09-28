@@ -21,7 +21,7 @@ use crate::gpu::Gpu;
 use crate::intro::{self, Intro};
 use crate::particles;
 use crate::renderer::Renderer;
-use crate::scene::{Action, Lens, Scene};
+use crate::scene::{Action, Lens, Metrics, Scene};
 use crate::timeline::Timeline;
 use crate::ui::{self, Button, UiLayer};
 
@@ -339,10 +339,43 @@ impl App {
     /// Rebuilds size-dependent state: camera lens and screen-space buttons.
     fn layout(&mut self) {
         let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor()) as f32;
+        let Some(aspect) = self.state.as_ref().map(|state| state.gpu.aspect()) else {
+            return;
+        };
+        let rebuilt = self.fit_layout(aspect);
         let Some(state) = &mut self.state else { return };
-        state.lens = Scene::lens(state.gpu.aspect());
+        if rebuilt {
+            state.renderer.set_scene(&state.gpu.context, &self.scene);
+        }
+        state.lens = self.scene.lens(aspect);
         state.ui = UiLayer::buttons(state.gpu.config.width as f32, scale, &self.buttons);
         state.renderer.set_ui(&state.gpu.context, &state.ui);
+        if rebuilt {
+            self.publish_tab_leaves();
+            self.request_redraw();
+        }
+    }
+
+    /// Rebuilds the scene when the screen's shape calls for the other layout
+    /// (wide or compact, e.g. after rotating a phone); returns whether it
+    /// did. Hover groups stay the same (same content, same order); hover,
+    /// focus and pins reset.
+    fn fit_layout(&mut self, aspect: f32) -> bool {
+        let metrics = Metrics::for_aspect(aspect);
+        if metrics == self.scene.metrics() {
+            return false;
+        }
+        let mut scene = Scene::with_metrics(&crate::content::resume(), metrics);
+        self.buttons = ui::native_buttons(&mut scene);
+        self.scene = scene;
+        (self.hovered, self.pressed, self.focused, self.pinned) = (None, None, None, None);
+        // Swapping a running scene restarts the particles from their cloud:
+        // let them fly straight to the new title (no second assembly). At
+        // startup, before the first frame, the assembly plays as usual.
+        if self.intro.is_some() && self.state.is_some() {
+            self.intro = Some(Intro::new(true));
+        }
+        true
     }
 
     /// The hover group at a cursor position: screen-space buttons first, then
@@ -555,9 +588,10 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::GpuReady(Ok(gpu)) => {
+                self.fit_layout(gpu.aspect());
                 let renderer = Renderer::new(&gpu.context, &self.scene, self.intro.is_some());
                 self.state = Some(State {
-                    lens: Scene::lens(gpu.aspect()),
+                    lens: self.scene.lens(gpu.aspect()),
                     ui: UiLayer::default(),
                     gpu: *gpu,
                     renderer,
