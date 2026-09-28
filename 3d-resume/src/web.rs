@@ -86,6 +86,23 @@ pub fn release_tab_at_edges(leaves: Rc<Cell<[bool; 2]>>) {
     listener.forget();
 }
 
+/// Enters or leaves fullscreen for the whole page, so the HTML nav stays
+/// visible. Browsers only allow it during a user gesture (click, key press);
+/// they leave fullscreen on Esc themselves.
+pub fn toggle_fullscreen() {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    if document.fullscreen_element().is_some() {
+        document.exit_fullscreen();
+    } else if let Some(page) = document.document_element()
+        && let Err(error) = page.request_fullscreen()
+    {
+        // E.g. iPhone Safari, which has no fullscreen for pages.
+        log::warn!("fullscreen not available: {error:?}");
+    }
+}
+
 /// Opens a link: `mailto:` in place (the mail client takes over), anything
 /// else in a new tab, falling back to same-tab navigation if a popup blocker
 /// refuses the new tab.

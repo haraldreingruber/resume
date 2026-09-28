@@ -527,6 +527,12 @@ impl Builder {
         self.text(
             "Scroll, swipe or use the arrow keys to travel back in time",
             hint,
+            0.05,
+            &mut cursor,
+        );
+        self.text(
+            "Double-click or press F for fullscreen",
+            hint,
             0.0,
             &mut cursor,
         );
