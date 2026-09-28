@@ -2,7 +2,7 @@ name: Native
 
 # Reusable: tests the workspace and builds the native 3D resume (release
 # profile) on Linux, Windows and macOS, uploading one archive per platform.
-# Called by ci.yml (every PR and push to master) and release.yml (tags), so
+# Called by ci.yml (every PR and push to main) and release.yml (tags), so
 # releases ship exactly what CI tested.
 on:
   workflow_call:
