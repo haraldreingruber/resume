@@ -43,8 +43,10 @@ pub struct UiLayer {
 
 impl UiLayer {
     /// Pill buttons in the bottom-right corner, right to left in the given
-    /// order, sized in logical pixels times `scale`.
-    pub fn buttons(width: f32, scale: f32, buttons: &[(&str, u32)]) -> Self {
+    /// order, sized in logical pixels times `scale`, and kept `inset`
+    /// (right, bottom; physical pixels) further in, e.g. out of a phone's
+    /// home indicator.
+    pub fn buttons(width: f32, scale: f32, inset: [f32; 2], buttons: &[(&str, u32)]) -> Self {
         let mut layer = Self::default();
         let (size, pad_x, pad_y, gap, margin) = (
             14.0 * scale,
@@ -54,11 +56,12 @@ impl UiLayer {
             16.0 * scale,
         );
         let height = size * 1.2 + 2.0 * pad_y;
-        let mut right = width - margin;
+        let bottom = margin + inset[1];
+        let mut right = width - margin - inset[0];
         for &(label, group) in buttons.iter().rev() {
             let style = TextStyle::new(Font::Bold, size, BUTTON_TEXT).group(group);
             let w = text::width(Font::Bold, size, label) + 2.0 * pad_x;
-            let rect = [right - w, margin, right, margin + height];
+            let rect = [right - w, bottom, right, bottom + height];
             let radius = height / 2.0;
             // The fill stays out of the hover group: highlighting would
             // lighten it and lower the label's contrast.
@@ -78,7 +81,7 @@ impl UiLayer {
                 FOCUS,
                 group,
             ));
-            let top = Vec3::new(right - w + pad_x, margin + height - pad_y * 0.8, 0.0);
+            let top = Vec3::new(right - w + pad_x, bottom + height - pad_y * 0.8, 0.0);
             text::layout(label, style, top, &mut layer.glyphs);
             layer.hits.push((rect, group));
             right -= w + gap;
@@ -106,7 +109,7 @@ mod tests {
 
     #[test]
     fn picks_buttons_in_the_bottom_right_corner() {
-        let layer = UiLayer::buttons(800.0, 1.0, &[("Text version", 5), ("PDF", 6)]);
+        let layer = UiLayer::buttons(800.0, 1.0, [0.0; 2], &[("Text version", 5), ("PDF", 6)]);
         assert_eq!(layer.hits.len(), 2);
         // "PDF" is rightmost.
         let ([x0, y0, x1, y1], group) = layer.hits[0];

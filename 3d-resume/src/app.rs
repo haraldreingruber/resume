@@ -61,6 +61,14 @@ pub struct App {
     window: Option<Arc<Window>>,
     state: Option<State>,
     last_frame: Instant,
+    /// Whether a frame is being drawn, and whether another one is due once
+    /// this event-loop iteration is over (see `about_to_wait`).
+    drawing: bool,
+    redraw_after: bool,
+    /// Frames presented so far, and when the app started (frame counts at
+    /// powers of two are logged, to see how fast a device draws).
+    presented: u64,
+    started: Instant,
     cursor: Option<PhysicalPosition<f64>>,
     /// Hover group under the cursor, and the one a mouse press started on.
     hovered: Option<u32>,
@@ -151,6 +159,10 @@ impl App {
             window: None,
             state: None,
             last_frame: Instant::now(),
+            drawing: false,
+            redraw_after: false,
+            presented: 0,
+            started: Instant::now(),
             cursor: None,
             hovered: None,
             pressed: None,
@@ -176,8 +188,13 @@ impl App {
         app
     }
 
-    fn request_redraw(&self) {
-        if let Some(window) = &self.window {
+    /// Asks for a frame. During a frame (e.g. focus clearing as the
+    /// timeline settles), only once the frame is over: iOS ignores requests
+    /// made while it draws (see `about_to_wait`).
+    fn request_redraw(&mut self) {
+        if self.drawing {
+            self.redraw_after = true;
+        } else if let Some(window) = &self.window {
             window.request_redraw();
         }
     }
@@ -212,12 +229,17 @@ impl App {
         let camera = self.scene.camera(position, lens);
         let projection = UiLayer::projection(gpu.config.width as f32, gpu.config.height as f32);
         let presented = gpu.render(|ctx, view| renderer.draw(ctx, view, &camera, projection));
+        if presented {
+            self.presented += 1;
+            if self.presented.is_power_of_two() {
+                let (frames, seconds) = (self.presented, self.started.elapsed().as_secs_f32());
+                log::info!("{frames} frames presented after {seconds:.1} s");
+            }
+        }
         // Keep redrawing while the timeline or the particles move, and retry
         // a frame the surface skipped (e.g. right after the first
         // `configure()`) so a skipped frame is never the last one drawn.
-        if moving || intro_active || !presented {
-            self.request_redraw();
-        }
+        self.redraw_after |= moving || intro_active || !presented;
         self.follow_station(!moving);
         if moving {
             // The link under a resting cursor changes as the camera moves.
@@ -333,7 +355,7 @@ impl App {
     }
 
     /// Redraws when the mouse moved the particles' pointer, so they react.
-    fn wake_intro(&self) {
+    fn wake_intro(&mut self) {
         if self
             .intro
             .as_ref()
@@ -355,7 +377,8 @@ impl App {
             state.renderer.set_scene(&state.gpu.context, &self.scene);
         }
         state.lens = self.scene.lens(aspect);
-        state.ui = UiLayer::buttons(state.gpu.config.width as f32, scale, &self.buttons);
+        let inset = self.window.as_deref().map_or([0.0; 2], safe_inset);
+        state.ui = UiLayer::buttons(state.gpu.config.width as f32, scale, inset, &self.buttons);
         state.renderer.set_ui(&state.gpu.context, &state.ui);
         if rebuilt {
             self.publish_tab_leaves();
@@ -568,6 +591,12 @@ impl App {
 impl ApplicationHandler<AppEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
+            // Back from the background (phones): a new surface.
+            if let Some(state) = &mut self.state {
+                state.gpu.resume();
+            }
+            self.layout();
+            self.request_redraw();
             return;
         }
         let window = match event_loop.create_window(window_attributes(&self.title)) {
@@ -592,9 +621,32 @@ impl ApplicationHandler<AppEvent> for App {
         wasm_bindgen_futures::spawn_local(init);
     }
 
+    /// Requests the next frame of an animation. Not from within the frame
+    /// itself: on iOS, winit redraws via `setNeedsDisplay`, which UIKit
+    /// ignores while it's drawing, so the animation would stop after one
+    /// frame.
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if std::mem::take(&mut self.redraw_after)
+            && let Some(window) = &self.window
+        {
+            window.request_redraw();
+        }
+    }
+
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        // Android destroys the window's surface while in the background.
+        if let Some(state) = &mut self.state {
+            state.gpu.suspend();
+        }
+    }
+
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::GpuReady(Ok(gpu)) => {
+                if !gpu.context.compute {
+                    // No particles: the crisp title from the start.
+                    self.intro = None;
+                }
                 self.fit_layout(gpu.aspect());
                 let renderer = Renderer::new(&gpu.context, &self.scene, self.intro.is_some());
                 self.state = Some(State {
@@ -630,7 +682,11 @@ impl ApplicationHandler<AppEvent> for App {
                 self.request_redraw();
             }
             WindowEvent::ScaleFactorChanged { .. } => self.layout(),
-            WindowEvent::RedrawRequested => self.redraw(),
+            WindowEvent::RedrawRequested => {
+                self.drawing = true;
+                self.redraw();
+                self.drawing = false;
+            }
             WindowEvent::KeyboardInput { event, .. } => self.keyboard(&event),
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             // The window lost focus, or on the web, Tab moved on from the canvas.
@@ -691,10 +747,31 @@ fn announce(text: &str) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn window_attributes(title: &str) -> winit::window::WindowAttributes {
-    Window::default_attributes()
+    let attributes = Window::default_attributes()
         .with_title(title)
-        .with_window_icon(crate::icon::window_icon())
-        .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0))
+        .with_window_icon(crate::icon::window_icon());
+    // Phones: the whole screen (iOS would otherwise make the view this size).
+    if cfg!(any(target_os = "android", target_os = "ios")) {
+        attributes
+    } else {
+        attributes.with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0))
+    }
+}
+
+/// How far (right, bottom; physical pixels) screen-space controls stay in
+/// from the window's edges: iOS draws the scene under the home indicator and
+/// rounded corners, outside winit's safe area (`inner_*`).
+fn safe_inset(window: &Window) -> [f32; 2] {
+    if !cfg!(target_os = "ios") {
+        return [0.0; 2];
+    }
+    let (Ok(safe), Ok(screen)) = (window.inner_position(), window.outer_position()) else {
+        return [0.0; 2];
+    };
+    let (safe_size, size) = (window.inner_size(), window.outer_size());
+    let right = size.width as i32 - (safe.x - screen.x) - safe_size.width as i32;
+    let bottom = size.height as i32 - (safe.y - screen.y) - safe_size.height as i32;
+    [right.max(0) as f32, bottom.max(0) as f32]
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -13,14 +13,56 @@ pub struct Context {
     pub queue: wgpu::Queue,
     /// sRGB format of the render target: shaders output linear colors.
     pub view_format: wgpu::TextureFormat,
+    /// Whether compute shaders run here (the intro particles need them;
+    /// OpenGL ES 3.0 phones lack them).
+    pub compute: bool,
+}
+
+impl Context {
+    /// Opens a device on `adapter`. It asks for WebGPU's default limits,
+    /// lowered wherever the adapter offers less (the iOS Simulator, say,
+    /// has 15 inter-stage variables, not 16): the app needs far less than
+    /// either.
+    pub async fn new(
+        adapter: &wgpu::Adapter,
+        label: &str,
+        view_format: wgpu::TextureFormat,
+    ) -> Result<Self, String> {
+        log::info!("GPU adapter: {:?}", adapter.get_info());
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some(label),
+                required_limits: wgpu::Limits::default().or_worse_values_from(&adapter.limits()),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        let compute = adapter
+            .get_downlevel_capabilities()
+            .flags
+            .contains(wgpu::DownlevelFlags::COMPUTE_SHADERS);
+        if !compute {
+            log::info!("no compute shaders: the intro shows the title without particles");
+        }
+        Ok(Self {
+            device,
+            queue,
+            view_format,
+            compute,
+        })
+    }
 }
 
 pub struct Gpu {
     instance: wgpu::Instance,
     window: Arc<Window>,
-    surface: wgpu::Surface<'static>,
+    /// `None` while the app is suspended (Android destroys the window's
+    /// surface then).
+    surface: Option<wgpu::Surface<'static>>,
     pub context: Context,
     pub config: wgpu::SurfaceConfiguration,
+    /// Frames the surface skipped so far (the first few are logged).
+    skipped: u32,
 }
 
 impl Gpu {
@@ -38,19 +80,11 @@ impl Gpu {
             })
             .await
             .map_err(|e| e.to_string())?;
-        log::info!("GPU adapter: {:?}", adapter.get_info());
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("resume"),
-                ..Default::default()
-            })
-            .await
-            .map_err(|e| e.to_string())?;
-
         let capabilities = surface.get_capabilities(&adapter);
         let format = capabilities.formats[0];
         let view_format = format.add_srgb_suffix();
-        let size = window.inner_size();
+        let context = Context::new(&adapter, "resume", view_format).await?;
+        let size = surface_size(&window);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -65,15 +99,20 @@ impl Gpu {
         let gpu = Self {
             instance,
             window,
-            surface,
-            context: Context {
-                device,
-                queue,
-                view_format,
-            },
+            surface: Some(surface),
+            context,
             config,
+            skipped: 0,
         };
         gpu.configure();
+        log::info!(
+            "surface: {:?} (drawn as {:?}), {}x{}, {:?}",
+            gpu.config.format,
+            gpu.context.view_format,
+            gpu.config.width,
+            gpu.config.height,
+            gpu.config.present_mode
+        );
         Ok(gpu)
     }
 
@@ -89,7 +128,30 @@ impl Gpu {
     }
 
     fn configure(&self) {
-        self.surface.configure(&self.context.device, &self.config);
+        if let Some(surface) = &self.surface {
+            surface.configure(&self.context.device, &self.config);
+        }
+    }
+
+    /// The app went to the background: drop the surface (Android destroys
+    /// the native window).
+    pub fn suspend(&mut self) {
+        self.surface = None;
+    }
+
+    /// Back in the foreground: a new surface for the (possibly new) native
+    /// window.
+    pub fn resume(&mut self) {
+        if self.surface.is_some() {
+            return;
+        }
+        match self.instance.create_surface(self.window.clone()) {
+            Ok(surface) => {
+                self.surface = Some(surface);
+                self.resize(surface_size(&self.window));
+            }
+            Err(error) => log::error!("creating surface failed: {error}"),
+        }
     }
 
     /// Draws a frame with `draw` and presents it. Returns `false` if the
@@ -111,7 +173,12 @@ impl Gpu {
 
     /// The next frame to draw into, or `None` to skip this frame.
     fn acquire(&mut self) -> Option<wgpu::SurfaceTexture> {
-        match self.surface.get_current_texture() {
+        let status = self.surface.as_ref()?.get_current_texture();
+        if !matches!(status, wgpu::CurrentSurfaceTexture::Success(_)) && self.skipped < 5 {
+            self.skipped += 1;
+            log::info!("frame skipped: {status:?}");
+        }
+        match status {
             wgpu::CurrentSurfaceTexture::Success(texture) => Some(texture),
             wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Timeout => None,
             wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
@@ -126,7 +193,7 @@ impl Gpu {
             wgpu::CurrentSurfaceTexture::Lost => {
                 match self.instance.create_surface(self.window.clone()) {
                     Ok(surface) => {
-                        self.surface = surface;
+                        self.surface = Some(surface);
                         self.configure();
                     }
                     Err(error) => log::error!("recreating surface failed: {error}"),
@@ -138,5 +205,16 @@ impl Gpu {
                 None
             }
         }
+    }
+}
+
+/// The size of the area the surface covers: the window's content. On iOS
+/// that's the whole screen, while winit's `inner_size` is only its safe area
+/// (without the notch and home indicator), so the image would be stretched.
+pub fn surface_size(window: &Window) -> PhysicalSize<u32> {
+    if cfg!(target_os = "ios") {
+        window.outer_size()
+    } else {
+        window.inner_size()
     }
 }

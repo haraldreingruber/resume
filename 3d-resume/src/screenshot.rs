@@ -140,9 +140,9 @@ pub fn run(request: &Request) -> Result<(), String> {
     let frames = frames(&scene, request)?;
 
     let ctx = pollster::block_on(context())?;
-    let mut renderer = Renderer::new(&ctx, &scene, true);
+    let mut renderer = Renderer::new(&ctx, &scene, ctx.compute);
     let mut intro = Intro::new(false);
-    let ui = UiLayer::buttons(width as f32, request.scale, &buttons);
+    let ui = UiLayer::buttons(width as f32, request.scale, [0.0; 2], &buttons);
     renderer.set_ui(&ctx, &ui);
     let lens = scene.lens(aspect);
     let projection = UiLayer::projection(width as f32, height as f32);
@@ -196,19 +196,7 @@ async fn context() -> Result<Context, String> {
     let adapter = wgpu::util::initialize_adapter_from_env_or_default(&instance, None)
         .await
         .map_err(|e| format!("no GPU adapter: {e}"))?;
-    log::info!("GPU adapter: {:?}", adapter.get_info());
-    let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            label: Some("screenshots"),
-            ..Default::default()
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(Context {
-        device,
-        queue,
-        view_format: wgpu::TextureFormat::Rgba8UnormSrgb,
-    })
+    Context::new(&adapter, "screenshots", wgpu::TextureFormat::Rgba8UnormSrgb).await
 }
 
 /// Copies the texture to the CPU: tightly packed RGBA rows (sRGB-encoded).

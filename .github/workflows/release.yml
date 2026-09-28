@@ -2,7 +2,8 @@ name: Release
 
 # Push a tag like `v0.1.0` to test and build the native apps (via the shared
 # native.yml, same as CI) and attach them, each bundled with the PDF, plus the
-# PDF itself to a GitHub Release.
+# PDF itself and the development builds for phones (mobile.yml: an Android
+# APK and an iOS Simulator app) to a GitHub Release.
 # The binaries are unsigned, so Windows SmartScreen and macOS Gatekeeper will
 # warn on first launch.
 on:
@@ -19,6 +20,11 @@ jobs:
   native:
     name: Native
     uses: ./.github/workflows/native.yml
+
+  mobile:
+    name: Mobile
+    uses: ./.github/workflows/mobile.yml
+    secrets: inherit
 
   latex:
     name: PDF
@@ -38,7 +44,7 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: [native, latex]
+    needs: [native, mobile, latex]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -57,7 +63,7 @@ jobs:
         working-directory: artifacts
         run: |
           pdf=Harald_Reingruber_resume.pdf
-          for archive in resume-3d-*.zip; do
+          for archive in resume-3d-windows-*.zip; do
             zip -j "$archive" "$pdf"
           done
           for archive in resume-3d-*.tar.gz; do

@@ -1,2 +1,5 @@
 # Font sources for the 3D app's build-time glyph atlas.
 *.ttf binary
+
+# Shell scripts run on Linux/macOS (and in Git Bash): keep LF endings.
+*.sh text eol=lf

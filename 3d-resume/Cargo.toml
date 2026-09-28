@@ -30,6 +30,13 @@ wasm-bindgen-futures = "0.4.79"
 web-sys = { version = "0.3.106", features = ["Window", "Document", "Element", "Event", "EventTarget", "History", "HtmlCanvasElement", "HtmlElement", "KeyboardEvent", "Location", "MediaQueryList", "Node", "Url", "UrlSearchParams"] }
 wgpu = { version = "30.0.1", default-features = false, features = ["webgpu", "web"] }
 
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.15.1"
+jni = "0.21"
+ndk-context = "0.1.1"
+wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
+winit = { version = "0.30", features = ["android-native-activity"] }
+
 [build-dependencies]
 fdsm = "0.8.0"
 fdsm-ttf-parser = "0.2.0"
