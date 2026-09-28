@@ -42,6 +42,8 @@ pub struct Stats {
 /// What the overlay shows about frames.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Summary {
+    /// Animation frames in the last second: 0 at rest, where only the
+    /// overlay's own refreshes redraw.
     pub fps: usize,
     /// Average and longest time between frames while animating.
     pub frame_ms: Option<(f32, f32)>,
@@ -111,7 +113,7 @@ impl Stats {
         let cpu: Vec<f32> = recent.iter().map(|f| f.cpu_ms).collect();
         let wait: Vec<f32> = recent.iter().map(|f| f.wait_ms).collect();
         Summary {
-            fps: recent.len(),
+            fps: recent.iter().filter(|f| f.continued).count(),
             frame_ms: average(&intervals)
                 .map(|avg| (avg, intervals.iter().copied().fold(0.0, f32::max))),
             cpu_ms: average(&cpu),
@@ -255,14 +257,15 @@ mod tests {
             stats.frame(t0 + ms(at), 3.0, 16.0, i > 0);
         }
         let summary = stats.summary(t0 + ms(950));
-        assert_eq!(summary.fps, 35);
+        // The first frame of each animation follows an idle pause.
+        assert_eq!(summary.fps, 33);
         let (average, max) = summary.frame_ms.expect("intervals");
         assert!((16.0..=19.0).contains(&average), "{average}");
         // The stutter counts; the idle pause between the animations doesn't.
         assert_eq!(max, 68.0);
         assert_eq!(summary.wait_ms, Some((30.0 * 14.0 + 5.0 * 16.0) / 35.0));
         // Frames older than a second drop out.
-        assert_eq!(stats.summary(t0 + ms(1_500)).fps, 5);
+        assert_eq!(stats.summary(t0 + ms(1_500)).fps, 4);
         assert_eq!(stats.summary(t0 + ms(3_000)).fps, 0);
     }
 
