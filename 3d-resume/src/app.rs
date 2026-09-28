@@ -1,6 +1,7 @@
 //! winit application: creates the window, initializes the GPU (async on the
-//! web), turns input into timeline movement, link clicks, keyboard focus and
-//! fullscreen toggles, runs the particle intro, and renders on demand.
+//! web), turns input into timeline movement, link clicks, keyboard focus,
+//! the About panel and fullscreen toggles, runs the particle intro, and
+//! renders on demand.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,6 +17,7 @@ use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{CursorIcon, Window, WindowId};
 
+use crate::about;
 use crate::focus::{self, Step};
 use crate::gpu::Gpu;
 use crate::intro::{self, Intro};
@@ -23,7 +25,7 @@ use crate::particles;
 use crate::renderer::Renderer;
 use crate::scene::{Action, Lens, Metrics, Scene};
 use crate::timeline::Timeline;
-use crate::ui::{self, Button, UiLayer};
+use crate::ui::{self, Button, Insets, Panel, UiLayer};
 
 /// Timeline units per wheel line and per touch/trackpad pixel.
 const SCROLL_PER_LINE: f32 = 0.35;
@@ -41,6 +43,9 @@ pub enum AppEvent {
     /// The page's Skills link was clicked.
     #[cfg(target_arch = "wasm32")]
     ToggleSkills,
+    /// The page's About button was clicked.
+    #[cfg(target_arch = "wasm32")]
+    ToggleAbout,
 }
 
 /// Start options from the URL (web) or command line (native).
@@ -58,6 +63,11 @@ pub struct App {
     timeline: Timeline,
     /// Screen-space buttons (native only; the web page has an HTML nav).
     buttons: Vec<Button>,
+    /// The About panel: whether it's open, the hover group of its source
+    /// link, and its session line (backend and GPU, known once the GPU is).
+    about_open: bool,
+    source: u32,
+    session: String,
     window: Option<Arc<Window>>,
     state: Option<State>,
     last_frame: Instant,
@@ -139,6 +149,7 @@ impl App {
         let resume = crate::content::resume();
         let mut scene = Scene::new(&resume);
         let buttons = ui::native_buttons(&mut scene);
+        let source = ui::source_link(&mut scene);
         let start = options
             .station
             .as_deref()
@@ -152,6 +163,9 @@ impl App {
             scene,
             timeline,
             buttons,
+            about_open: false,
+            source,
+            session: String::new(),
             window: None,
             state: None,
             last_frame: Instant::now(),
@@ -176,7 +190,7 @@ impl App {
         #[cfg(target_arch = "wasm32")]
         {
             crate::web::release_tab_at_edges(app.tab_leaves.clone());
-            crate::web::on_skills_link(app.proxy.clone());
+            crate::web::forward_nav_clicks(app.proxy.clone());
         }
         app.publish_tab_leaves();
         app
@@ -269,10 +283,15 @@ impl App {
         }
     }
 
-    /// Keyboard focus targets: the links of the station in view, then the
-    /// screen-space buttons.
+    /// Keyboard focus targets: the open About panel's link, the links of
+    /// the station in view, then the screen-space buttons.
     fn targets(&self) -> Vec<u32> {
-        focus::targets(&self.scene, self.station, &self.buttons)
+        let panel = if self.about_open {
+            std::slice::from_ref(&self.source)
+        } else {
+            &[]
+        };
+        focus::targets(&self.scene, self.station, panel, &self.buttons)
     }
 
     fn focus_index(&self, targets: &[u32]) -> Option<usize> {
@@ -356,9 +375,8 @@ impl App {
         }
     }
 
-    /// Rebuilds size-dependent state: camera lens and screen-space buttons.
+    /// Rebuilds size-dependent state: camera lens and screen-space layer.
     fn layout(&mut self) {
-        let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor()) as f32;
         let Some(aspect) = self.state.as_ref().map(|state| state.gpu.aspect()) else {
             return;
         };
@@ -368,13 +386,32 @@ impl App {
             state.renderer.set_scene(&state.gpu.context, &self.scene);
         }
         state.lens = self.scene.lens(aspect);
-        let inset = self.window.as_deref().map_or([0.0; 2], safe_inset);
-        state.ui = UiLayer::buttons(state.gpu.config.width as f32, scale, inset, &self.buttons);
-        state.renderer.set_ui(&state.gpu.context, &state.ui);
+        self.update_ui();
         if rebuilt {
             self.publish_tab_leaves();
             self.request_redraw();
         }
+    }
+
+    /// Rebuilds the screen-space layer: the buttons, and the About panel if
+    /// it's open.
+    fn update_ui(&mut self) {
+        let Some(state) = &mut self.state else { return };
+        let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor()) as f32;
+        let insets = self
+            .window
+            .as_deref()
+            .map_or_else(Insets::default, safe_insets);
+        let size = [
+            state.gpu.config.width as f32,
+            state.gpu.config.height as f32,
+        ];
+        let panel = self.about_open.then(|| Panel {
+            session: &self.session,
+            source: self.source,
+        });
+        state.ui = UiLayer::new(size, scale, insets, &self.buttons, panel.as_ref());
+        state.renderer.set_ui(&state.gpu.context, &state.ui);
     }
 
     /// Rebuilds the scene when the screen's shape calls for the other layout
@@ -388,6 +425,7 @@ impl App {
         }
         let mut scene = Scene::with_metrics(&crate::content::resume(), metrics);
         self.buttons = ui::native_buttons(&mut scene);
+        self.source = ui::source_link(&mut scene);
         self.scene = scene;
         (self.hovered, self.pressed, self.focused, self.pinned) = (None, None, None, None);
         // Swapping a running scene restarts the particles from their cloud:
@@ -399,15 +437,29 @@ impl App {
         true
     }
 
-    /// The hover group at a cursor position: screen-space buttons first, then
-    /// links in the scene.
+    /// The hover group at a cursor position: screen-space buttons and the
+    /// panel's link first, then links in the scene (unless the panel hides
+    /// them).
     fn group_at(&self, position: PhysicalPosition<f64>) -> Option<u32> {
         let state = self.state.as_ref()?;
         let height = state.gpu.config.height as f32;
-        let (x, y) = (position.x as f32, position.y as f32);
-        state.ui.pick(x, height - y).or_else(|| {
+        let (x, y) = (position.x as f32, height - position.y as f32);
+        state.ui.pick(x, y).or_else(|| {
+            if state.ui.covers(x, y) {
+                return None;
+            }
             let camera = self.scene.camera(self.timeline.position(), &state.lens);
             self.scene.pick(&camera, ndc(position, &state.gpu))
+        })
+    }
+
+    /// Whether a cursor position is on the open About panel.
+    fn on_panel(&self, position: PhysicalPosition<f64>) -> bool {
+        self.state.as_ref().is_some_and(|state| {
+            let height = state.gpu.config.height as f32;
+            state
+                .ui
+                .covers(position.x as f32, height - position.y as f32)
         })
     }
 
@@ -439,6 +491,7 @@ impl App {
                 self.update_groups();
             }
             Some(Action::ToggleSkills) => self.toggle_skills(),
+            Some(Action::ToggleAbout) => self.toggle_about(),
             None => {}
         }
     }
@@ -455,9 +508,43 @@ impl App {
         self.request_redraw();
     }
 
-    /// A click or tap on empty space: unpins a skill; the second of a quick
-    /// pair toggles fullscreen.
+    /// I, the ⓘ button or the page's About button: opens or closes the
+    /// About panel.
+    fn toggle_about(&mut self) {
+        self.set_about(!self.about_open);
+    }
+
+    fn set_about(&mut self, open: bool) {
+        if open == self.about_open {
+            return;
+        }
+        self.about_open = open;
+        self.update_ui();
+        if !open && self.focused == Some(self.source) {
+            self.set_focus(None);
+        } else {
+            self.publish_tab_leaves();
+        }
+        #[cfg(target_arch = "wasm32")]
+        crate::web::show_about_expanded(open);
+        if open {
+            announce(&about::announcement(&self.session));
+        }
+        // The panel may now be under (or gone from under) the cursor.
+        self.update_hover();
+        self.request_redraw();
+    }
+
+    /// A click or tap on empty space: closes the About panel (unless it's
+    /// on the panel), or unpins a skill; the second of a quick pair toggles
+    /// fullscreen.
     fn press_empty(&mut self, position: PhysicalPosition<f64>) {
+        if self.on_panel(position) {
+            return;
+        }
+        if self.about_open {
+            return self.set_about(false);
+        }
         if self.pinned.take().is_some() {
             self.update_groups();
         }
@@ -510,7 +597,9 @@ impl App {
                 return;
             }
             Key::Named(NamedKey::Escape) => {
-                if self.focused.is_some() {
+                if self.about_open {
+                    self.set_about(false);
+                } else if self.focused.is_some() {
                     self.set_focus(None);
                 } else {
                     self.leave_fullscreen();
@@ -530,6 +619,8 @@ impl App {
                     self.toggle_fullscreen();
                 } else if c.eq_ignore_ascii_case("s") {
                     self.toggle_skills();
+                } else if c.eq_ignore_ascii_case("i") {
+                    self.toggle_about();
                 }
                 return;
             }
@@ -622,6 +713,7 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::GpuReady(Ok(gpu)) => {
+                self.session = about::session(&gpu.context.adapter);
                 if !gpu.context.compute {
                     // No particles: the crisp title from the start.
                     self.intro = None;
@@ -640,6 +732,8 @@ impl ApplicationHandler<AppEvent> for App {
             }
             #[cfg(target_arch = "wasm32")]
             AppEvent::ToggleSkills => self.toggle_skills(),
+            #[cfg(target_arch = "wasm32")]
+            AppEvent::ToggleAbout => self.toggle_about(),
             AppEvent::GpuReady(Err(error)) => {
                 log::error!("WebGPU initialization failed: {error}");
                 #[cfg(target_arch = "wasm32")]
@@ -733,20 +827,36 @@ fn window_attributes(title: &str) -> winit::window::WindowAttributes {
     }
 }
 
-/// How far (right, bottom; physical pixels) screen-space controls stay in
-/// from the window's edges: iOS draws the scene under the home indicator and
-/// rounded corners, outside winit's safe area (`inner_*`).
-fn safe_inset(window: &Window) -> [f32; 2] {
+/// How far screen-space controls stay in from the window's edges: on the
+/// web, the page's nav covers the bottom-right corner.
+#[cfg(target_arch = "wasm32")]
+fn safe_insets(_window: &Window) -> Insets {
+    Insets {
+        bottom: crate::web::nav_height(),
+        ..Insets::default()
+    }
+}
+
+/// How far screen-space controls stay in from the window's edges: iOS draws
+/// the scene under the notch, the home indicator and rounded corners,
+/// outside winit's safe area (`inner_*`).
+#[cfg(not(target_arch = "wasm32"))]
+fn safe_insets(window: &Window) -> Insets {
     if !cfg!(target_os = "ios") {
-        return [0.0; 2];
+        return Insets::default();
     }
     let (Ok(safe), Ok(screen)) = (window.inner_position(), window.outer_position()) else {
-        return [0.0; 2];
+        return Insets::default();
     };
     let (safe_size, size) = (window.inner_size(), window.outer_size());
+    let top = safe.y - screen.y;
     let right = size.width as i32 - (safe.x - screen.x) - safe_size.width as i32;
-    let bottom = size.height as i32 - (safe.y - screen.y) - safe_size.height as i32;
-    [right.max(0) as f32, bottom.max(0) as f32]
+    let bottom = size.height as i32 - top - safe_size.height as i32;
+    Insets {
+        top: top.max(0) as f32,
+        right: right.max(0) as f32,
+        bottom: bottom.max(0) as f32,
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -10,6 +10,7 @@ use minijinja::{AutoEscape, Environment, Value, context};
 use resume_model::{Basics, DateRange, Education, Language, Location, Project, Resume, RichText};
 use serde::{Deserialize, Serialize};
 
+use resume_model::about::ABOUT;
 use resume_model::site::{PDF_FILE, SITE_URL};
 
 pub fn readme(resume: &Resume) -> anyhow::Result<String> {
@@ -23,7 +24,12 @@ pub fn plain_html(resume: &Resume) -> anyhow::Result<String> {
 fn render(name: &str, resume: &Resume) -> anyhow::Result<String> {
     let env = environment();
     let template = env.get_template(name)?;
-    let ctx = context! { resume => Value::from_serialize(resume), site_url => SITE_URL, pdf_file => PDF_FILE };
+    let ctx = context! {
+        resume => Value::from_serialize(resume),
+        site_url => SITE_URL,
+        pdf_file => PDF_FILE,
+        about => Value::from_serialize(&ABOUT),
+    };
     let mut out = template.render(ctx)?;
     if !out.ends_with('\n') {
         out.push('\n');

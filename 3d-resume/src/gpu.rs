@@ -16,6 +16,8 @@ pub struct Context {
     /// Whether compute shaders run here (the intro particles need them;
     /// OpenGL ES 3.0 phones lack them).
     pub compute: bool,
+    /// The backend and GPU (shown in the About panel).
+    pub adapter: wgpu::AdapterInfo,
 }
 
 impl Context {
@@ -28,7 +30,8 @@ impl Context {
         label: &str,
         view_format: wgpu::TextureFormat,
     ) -> Result<Self, String> {
-        log::info!("GPU adapter: {:?}", adapter.get_info());
+        let info = adapter.get_info();
+        log::info!("GPU adapter: {info:?}");
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some(label),
@@ -49,6 +52,7 @@ impl Context {
             queue,
             view_format,
             compute,
+            adapter: info,
         })
     }
 }

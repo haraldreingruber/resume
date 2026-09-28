@@ -88,8 +88,13 @@
   .tags { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 1rem; padding: 0; list-style: none; }
   .tags li { padding: 0.15rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.92rem; }
   h3.group { margin: 0.8rem 0 0; font-size: 0.95rem; }
+  footer { max-width: 64rem; margin: -2rem auto 0; padding: 0 1rem 3rem; }
+  footer details { padding-top: 1rem; border-top: 1px solid var(--border); }
+  footer summary { cursor: pointer; color: var(--heading); font-weight: 700; }
+  footer h3 { margin: 1rem 0 0.2rem; font-size: 1rem; }
+  footer p { margin: 0.2rem 0 0; }
   @media print {
-    .actions, .notice { display: none !important; }
+    .actions, .notice, footer { display: none !important; }
     main { padding: 0; }
   }
 </style>
@@ -186,6 +191,16 @@
     </div>
   </div>
 </main>
+<footer>
+  <details id="about">
+    <summary>{{ about.title }}</summary>
+    {% for s in about.sections %}
+    <h3>{{ s.heading }}</h3>
+    <p>{{ s.text }}</p>
+    {% endfor %}
+    <p><a href="{{ about.source_url }}">{{ about.source_label }}</a></p>
+  </details>
+</footer>
 <script>
   // index.html redirects here with ?no-webgpu when WebGPU is unavailable.
   if (new URLSearchParams(location.search).has("no-webgpu")) {

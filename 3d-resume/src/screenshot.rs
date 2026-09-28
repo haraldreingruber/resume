@@ -3,17 +3,18 @@
 //! without a display, e.g. CI with Mesa's software Vulkan driver
 //! (`WGPU_ADAPTER_NAME=llvmpipe`). Each image shows a station at rest, as the
 //! app shows it, including the native buttons, plus two frames of the
-//! particle intro. The particles run in fixed frame steps, so the images are
+//! particle intro and one with the About panel open. The particles run in fixed frame steps, so the images are
 //! deterministic.
 
 use std::path::{Path, PathBuf};
 
+use crate::about;
 use crate::focus;
 use crate::gpu::Context;
 use crate::intro::{self, Intro};
 use crate::renderer::Renderer;
 use crate::scene::{Metrics, Scene};
-use crate::ui::{self, UiLayer};
+use crate::ui::{self, Insets, Panel, UiLayer};
 
 /// The native window's default (logical) size.
 pub const DEFAULT_SIZE: [u32; 2] = [1280, 800];
@@ -42,15 +43,19 @@ pub struct Request {
     pub scale: f32,
     /// Gives keyboard focus to the n-th focus target (shows its focus ring).
     pub focus: Option<usize>,
+    /// Shows the About panel.
+    pub about: bool,
 }
 
 /// One image: where on the timeline, until when the particles run (`None`:
-/// until they come to rest), and which focus target has keyboard focus.
+/// until they come to rest), which focus target has keyboard focus, and
+/// whether the About panel is open.
 struct Frame {
     name: String,
     position: f32,
     until: Option<f32>,
     focus: Option<usize>,
+    about: bool,
 }
 
 /// The images to take, in simulation order.
@@ -60,6 +65,7 @@ fn frames(scene: &Scene, request: &Request) -> Result<Vec<Frame>, String> {
         position: i as f32,
         until: request.time,
         focus: request.focus,
+        about: request.about,
     };
     if let Some(position) = request.position {
         return Ok(vec![Frame {
@@ -67,6 +73,7 @@ fn frames(scene: &Scene, request: &Request) -> Result<Vec<Frame>, String> {
             position,
             until: request.time,
             focus: request.focus,
+            about: request.about,
         }]);
     }
     if let Some(key) = &request.station {
@@ -84,13 +91,20 @@ fn frames(scene: &Scene, request: &Request) -> Result<Vec<Frame>, String> {
             position: 0.0,
             until: Some(ASSEMBLING_AT),
             focus: None,
+            about: false,
         },
         station(0),
+        Frame {
+            name: "00-about".to_owned(),
+            about: true,
+            ..station(0)
+        },
         Frame {
             name: "00-intro-scattering".to_owned(),
             position: SCATTERING_AT,
             until: None,
             focus: None,
+            about: false,
         },
     ];
     frames.extend((1..scene.station_count()).map(station));
@@ -137,13 +151,13 @@ pub fn run(request: &Request) -> Result<(), String> {
     // The layout the app would pick for this screen shape.
     let mut scene = Scene::with_metrics(&resume, Metrics::for_aspect(aspect));
     let buttons = ui::native_buttons(&mut scene);
+    let source = ui::source_link(&mut scene);
     let frames = frames(&scene, request)?;
 
     let ctx = pollster::block_on(context())?;
     let mut renderer = Renderer::new(&ctx, &scene, ctx.compute);
     let mut intro = Intro::new(false);
-    let ui = UiLayer::buttons(width as f32, request.scale, [0.0; 2], &buttons);
-    renderer.set_ui(&ctx, &ui);
+    let session = about::session(&ctx.adapter);
     let lens = scene.lens(aspect);
     let projection = UiLayer::projection(width as f32, height as f32);
     let target = ctx.device.create_texture(&wgpu::TextureDescriptor {
@@ -166,7 +180,21 @@ pub fn run(request: &Request) -> Result<(), String> {
     for frame in frames {
         simulate(&mut renderer, &ctx, &mut intro, frame.position, frame.until);
         let station = frame.position.round() as usize;
-        let targets = focus::targets(&scene, station, &buttons);
+        let panel = frame.about.then(|| Panel {
+            session: &session,
+            source,
+        });
+        let size = [width as f32, height as f32];
+        let ui = UiLayer::new(
+            size,
+            request.scale,
+            Insets::default(),
+            &buttons,
+            panel.as_ref(),
+        );
+        renderer.set_ui(&ctx, &ui);
+        let panel_links: &[u32] = if frame.about { &[source] } else { &[] };
+        let targets = focus::targets(&scene, station, panel_links, &buttons);
         let focused = frame.focus.and_then(|n| targets.get(n).copied());
         renderer.set_groups(&ctx, None, focused, scene.relations(focused));
         let camera = scene.camera(frame.position, &lens);
