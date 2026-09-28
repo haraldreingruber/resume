@@ -142,7 +142,7 @@ pub fn run(request: &Request) -> Result<(), String> {
     let ctx = pollster::block_on(context())?;
     let mut renderer = Renderer::new(&ctx, &scene, ctx.compute);
     let mut intro = Intro::new(false);
-    let ui = UiLayer::buttons(width as f32, request.scale, &buttons);
+    let ui = UiLayer::buttons(width as f32, request.scale, [0.0; 2], &buttons);
     renderer.set_ui(&ctx, &ui);
     let lens = scene.lens(aspect);
     let projection = UiLayer::projection(width as f32, height as f32);

@@ -364,7 +364,8 @@ impl App {
             state.renderer.set_scene(&state.gpu.context, &self.scene);
         }
         state.lens = self.scene.lens(aspect);
-        state.ui = UiLayer::buttons(state.gpu.config.width as f32, scale, &self.buttons);
+        let inset = self.window.as_deref().map_or([0.0; 2], safe_inset);
+        state.ui = UiLayer::buttons(state.gpu.config.width as f32, scale, inset, &self.buttons);
         state.renderer.set_ui(&state.gpu.context, &state.ui);
         if rebuilt {
             self.publish_tab_leaves();
@@ -717,10 +718,31 @@ fn announce(text: &str) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn window_attributes(title: &str) -> winit::window::WindowAttributes {
-    Window::default_attributes()
+    let attributes = Window::default_attributes()
         .with_title(title)
-        .with_window_icon(crate::icon::window_icon())
-        .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0))
+        .with_window_icon(crate::icon::window_icon());
+    // Phones: the whole screen (iOS would otherwise make the view this size).
+    if cfg!(any(target_os = "android", target_os = "ios")) {
+        attributes
+    } else {
+        attributes.with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0))
+    }
+}
+
+/// How far (right, bottom; physical pixels) screen-space controls stay in
+/// from the window's edges: iOS draws the scene under the home indicator and
+/// rounded corners, outside winit's safe area (`inner_*`).
+fn safe_inset(window: &Window) -> [f32; 2] {
+    if !cfg!(target_os = "ios") {
+        return [0.0; 2];
+    }
+    let (Ok(safe), Ok(screen)) = (window.inner_position(), window.outer_position()) else {
+        return [0.0; 2];
+    };
+    let (safe_size, size) = (window.inner_size(), window.outer_size());
+    let right = size.width as i32 - (safe.x - screen.x) - safe_size.width as i32;
+    let bottom = size.height as i32 - (safe.y - screen.y) - safe_size.height as i32;
+    [right.max(0) as f32, bottom.max(0) as f32]
 }
 
 #[cfg(target_arch = "wasm32")]

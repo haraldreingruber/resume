@@ -84,7 +84,7 @@ impl Gpu {
         let format = capabilities.formats[0];
         let view_format = format.add_srgb_suffix();
         let context = Context::new(&adapter, "resume", view_format).await?;
-        let size = window.inner_size();
+        let size = surface_size(&window);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -148,7 +148,7 @@ impl Gpu {
         match self.instance.create_surface(self.window.clone()) {
             Ok(surface) => {
                 self.surface = Some(surface);
-                self.resize(self.window.inner_size());
+                self.resize(surface_size(&self.window));
             }
             Err(error) => log::error!("creating surface failed: {error}"),
         }
@@ -205,5 +205,16 @@ impl Gpu {
                 None
             }
         }
+    }
+}
+
+/// The size of the area the surface covers: the window's content. On iOS
+/// that's the whole screen, while winit's `inner_size` is only its safe area
+/// (without the notch and home indicator), so the image would be stretched.
+pub fn surface_size(window: &Window) -> PhysicalSize<u32> {
+    if cfg!(target_os = "ios") {
+        window.outer_size()
+    } else {
+        window.inner_size()
     }
 }
