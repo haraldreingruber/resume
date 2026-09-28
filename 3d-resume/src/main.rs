@@ -6,6 +6,8 @@ mod app;
 mod content;
 mod focus;
 mod gpu;
+#[cfg(not(target_arch = "wasm32"))]
+mod icon;
 mod intro;
 mod lines;
 mod links;

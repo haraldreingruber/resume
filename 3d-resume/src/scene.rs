@@ -175,8 +175,12 @@ pub struct Scene {
     pub shapes: Vec<ShapeInstance>,
     pub lines: Vec<LineInstance>,
     hits: Vec<Hit>,
-    /// `actions[group - 1]` is what clicking hover group `group` does.
+    /// `actions[group - 1]` is what clicking hover group `group` does, and
+    /// `labels[group - 1]` what it's called (for screen readers).
     actions: Vec<Action>,
+    labels: Vec<String>,
+    /// Per station, what a screen reader announces when it comes into view.
+    summaries: Vec<String>,
     pub title: Title,
     /// Skill-map links as (entry node, skill node) hover groups.
     edges: Vec<(u32, u32)>,
@@ -402,6 +406,8 @@ impl Scene {
             lines,
             hits: builder.hits,
             actions: builder.actions,
+            labels: builder.labels,
+            summaries: builder.summaries,
             title,
             edges: builder.edges,
             skills_station,
@@ -467,8 +473,41 @@ impl Scene {
 
     /// Registers an action outside the scene (e.g. screen-space buttons) and
     /// returns its hover group, or 0 if all groups are taken.
-    pub fn add_action(&mut self, action: Action) -> u32 {
-        add_action(&mut self.actions, action)
+    pub fn add_action(&mut self, action: Action, label: &str) -> u32 {
+        add_action(&mut self.actions, &mut self.labels, action, label)
+    }
+
+    /// What a screen reader announces when a station comes into view.
+    pub fn summary(&self, station: usize) -> Option<&str> {
+        self.summaries.get(station).map(String::as_str)
+    }
+
+    /// What a screen reader announces when `group` gets keyboard focus: the
+    /// link or button, or a skill-map node with its connections.
+    pub fn describe(&self, group: u32) -> Option<String> {
+        let index = (group as usize).checked_sub(1)?;
+        let (action, label) = (self.actions.get(index)?, self.labels.get(index)?);
+        let related = || {
+            let related = self
+                .relations(Some(group))
+                .map(|r| r.related)
+                .unwrap_or_default();
+            let names: Vec<&str> = related
+                .iter()
+                .filter_map(|&g| self.labels.get(g as usize - 1))
+                .map(String::as_str)
+                .collect();
+            names.join(", ")
+        };
+        Some(match action {
+            Action::Open(Link::Url(_)) => format!("{label}, link"),
+            Action::Open(_) | Action::ToggleSkills => format!("{label}, button"),
+            Action::GoToStation(_) => format!("{label}: {}. Press Enter to go there.", related()),
+            Action::Pin => match related() {
+                used if used.is_empty() => label.clone(),
+                used => format!("{label}, used at {used}"),
+            },
+        })
     }
 
     /// Camera parameters for an aspect ratio; recompute only on resize.
@@ -531,14 +570,31 @@ impl Camera {
     }
 }
 
-fn add_action(actions: &mut Vec<Action>, action: Action) -> u32 {
+fn add_action(
+    actions: &mut Vec<Action>,
+    labels: &mut Vec<String>,
+    action: Action,
+    label: &str,
+) -> u32 {
     // Groups are 1-based; the last one is reserved for the title.
     if actions.len() + 1 >= TITLE_GROUP as usize {
         log::warn!("out of hover groups; {action:?} won't be clickable");
         return 0;
     }
     actions.push(action);
+    labels.push(label.to_owned());
     actions.len() as u32
+}
+
+/// Joins sentences for a spoken summary: each ends with exactly one period.
+fn sentences<S: AsRef<str>>(parts: impl IntoIterator<Item = S>) -> String {
+    parts
+        .into_iter()
+        .map(|part| part.as_ref().trim().trim_end_matches('.').to_owned())
+        .filter(|part| !part.is_empty())
+        .map(|part| part + ".")
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Accumulates one station's glyphs, shapes and lines; hits, actions (hover
@@ -551,6 +607,8 @@ struct Builder {
     lines: Vec<LineInstance>,
     hits: Vec<Hit>,
     actions: Vec<Action>,
+    labels: Vec<String>,
+    summaries: Vec<String>,
     edges: Vec<(u32, u32)>,
 }
 
@@ -592,7 +650,8 @@ impl Builder {
             .iter()
             .map(|span| {
                 let group = span.link.as_ref().map_or(0, |url| {
-                    add_action(&mut self.actions, Action::Open(Link::Url(url.clone())))
+                    let action = Action::Open(Link::Url(url.clone()));
+                    add_action(&mut self.actions, &mut self.labels, action, &span.text)
                 });
                 let color = if group != 0 || span.style.italic {
                     accent
@@ -622,7 +681,7 @@ impl Builder {
 
     /// A single-line clickable link (e.g. a contact detail).
     fn link(&mut self, label: &str, action: Action, style: TextStyle, gap: f32, cursor: &mut Vec3) {
-        let group = add_action(&mut self.actions, action);
+        let group = add_action(&mut self.actions, &mut self.labels, action, label);
         let run = Run {
             text: label,
             font: style.font,
@@ -740,6 +799,10 @@ impl Builder {
 
     fn intro(&mut self, resume: &Resume, anchor: Vec3) {
         let basics = &resume.basics;
+        self.summaries.push(sentences([
+            format!("{}: {}", basics.name, basics.label),
+            basics.summary.plain(),
+        ]));
         let mut cursor = anchor + Vec3::new(0.0, 0.5, 0.0);
         let name = TextStyle::new(Font::Bold, self.m.name_size, NAME)
             .centered()
@@ -773,6 +836,19 @@ impl Builder {
     }
 
     fn job(&mut self, work: &Work, anchor: Vec3, accent: [f32; 4]) {
+        self.summaries.push(sentences([
+            format!("{}, {}", work.position, work.organization),
+            Self::meta_line(&work.dates, work.location.as_deref()).replace("  ·  ", ", "),
+            work.summary
+                .as_ref()
+                .map(RichText::plain)
+                .unwrap_or_default(),
+            if work.skills.is_empty() {
+                String::new()
+            } else {
+                format!("Skills: {}", work.skills.join(", "))
+            },
+        ]));
         let mut cursor = anchor - Vec3::new(self.m.block_width / 2.0, 0.0, 0.0);
         let meta = Self::meta_line(&work.dates, work.location.as_deref());
         self.text(
@@ -803,6 +879,15 @@ impl Builder {
     }
 
     fn project(&mut self, project: &Project, anchor: Vec3, accent: [f32; 4]) {
+        self.summaries.push(sentences([
+            format!("{}: “{}”", project.heading(), project.title),
+            Self::meta_line(&project.dates, project.location.as_deref()).replace("  ·  ", ", "),
+            project
+                .description
+                .as_ref()
+                .map(RichText::plain)
+                .unwrap_or_default(),
+        ]));
         let mut cursor = anchor - Vec3::new(self.m.block_width / 2.0, 0.0, 0.0);
         let meta = Self::meta_line(&project.dates, project.location.as_deref());
         self.text(
@@ -835,6 +920,11 @@ impl Builder {
     }
 
     fn education(&mut self, education: &Education, anchor: Vec3, accent: [f32; 4]) {
+        self.summaries.push(sentences([
+            format!("{}, {}", education.title(), education.institution),
+            Self::meta_line(&education.dates, education.location.as_deref()).replace("  ·  ", ", "),
+            education.courses_sentence().unwrap_or_default(),
+        ]));
         let mut cursor = anchor - Vec3::new(self.m.block_width / 2.0, 0.0, 0.0);
         let meta = Self::meta_line(&education.dates, education.location.as_deref());
         self.text(
@@ -859,6 +949,21 @@ impl Builder {
     }
 
     fn outro(&mut self, resume: &Resume, anchor: Vec3) {
+        let languages: Vec<String> = resume.languages.iter().map(ToString::to_string).collect();
+        let contacts: Vec<String> = std::iter::once(resume.basics.email.clone())
+            .chain(
+                resume
+                    .basics
+                    .labeled_profiles()
+                    .into_iter()
+                    .map(|(label, _)| label),
+            )
+            .collect();
+        self.summaries.push(sentences([
+            format!("Languages: {}", languages.join(", ")),
+            format!("Get in touch: {}", contacts.join(", ")),
+            "Press Home to return to the start".to_owned(),
+        ]));
         let accent = PALETTE[0];
         let mut cursor = anchor + Vec3::new(0.0, 0.3, 0.0);
         let heading = self.style(Font::Bold, 0.16, NAME).centered();
@@ -897,6 +1002,14 @@ impl Builder {
     /// them (from `entries`, with their stations), linked by curves. Entries
     /// fly to their station when activated; skills pin their connections.
     fn skill_map(&mut self, resume: &Resume, entries: &[(usize, Entry)], anchor: Vec3) {
+        let skills: usize = resume.skills.iter().map(|g| g.keywords.len()).sum();
+        self.summaries.push(sentences([
+            format!(
+                "Skill map: {skills} skills in {} groups, linked to the jobs and projects that used them",
+                resume.skills.len()
+            ),
+            "Press Tab to go through them".to_owned(),
+        ]));
         let (left, z) = (anchor.x - self.m.map_half_width, anchor.z);
         let mut cursor = Vec3::new(left, anchor.y + 0.55, z);
         let title = self.style(Font::Bold, 0.16, NAME);
@@ -951,7 +1064,12 @@ impl Builder {
                     NodeKind::Entry { station } => Action::GoToStation(station),
                     NodeKind::Skill { .. } => Action::Pin,
                 };
-                add_action(&mut self.actions, action)
+                add_action(
+                    &mut self.actions,
+                    &mut self.labels,
+                    action,
+                    &node.label.text,
+                )
             })
             .collect();
         let color = |kind: NodeKind| match kind {
@@ -1140,7 +1258,7 @@ mod tests {
         assert!(title.bounds[0] < title.bounds[2] && title.bounds[1] < title.bounds[3]);
         assert_eq!(scene.action(TITLE_GROUP), None);
         // Adding actions never hands out the title's group.
-        while let group @ 1.. = scene.add_action(Action::Open(Link::Pdf)) {
+        while let group @ 1.. = scene.add_action(Action::Open(Link::Pdf), "PDF") {
             assert!(group < TITLE_GROUP);
         }
     }
@@ -1242,6 +1360,40 @@ mod tests {
             assert!(lens.distance * tan_half_y >= metrics.view_half_height - 1e-4);
             assert!(lens.distance * tan_half_y * aspect >= metrics.view_half_width - 1e-4);
         }
+    }
+
+    #[test]
+    fn screen_readers_hear_every_station_and_target() {
+        let resume = crate::content::resume();
+        let scene = Scene::new(&resume);
+        for i in 0..scene.station_count() {
+            let summary = scene.summary(i).unwrap();
+            assert!(
+                summary.ends_with('.') && !summary.contains(".."),
+                "{summary}"
+            );
+        }
+        let dedalus = scene
+            .summary(scene.station_index("dedalus").unwrap())
+            .unwrap();
+        assert!(dedalus.starts_with("Medical 3D Visualization Expert, Dedalus HealthCare DACH."));
+        assert!(dedalus.contains("Skills: Rust,"));
+        // Every group has a description.
+        for group in 1..=scene.actions.len() as u32 {
+            assert!(
+                scene.describe(group).is_some_and(|d| !d.is_empty()),
+                "{group}"
+            );
+        }
+        let outro = scene.links(scene.station_count() - 1).start;
+        assert_eq!(
+            scene.describe(outro).unwrap(),
+            "harald.reingruber@gmail.com, link"
+        );
+        // Skill-map nodes name their connections.
+        let map = scene.links(scene.skills_station());
+        let entry = scene.describe(map.start).unwrap();
+        assert!(entry.starts_with("Dedalus HealthCare: Rust, "), "{entry}");
     }
 
     #[test]
