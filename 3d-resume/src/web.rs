@@ -7,6 +7,9 @@ use std::rc::Rc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{HtmlCanvasElement, KeyboardEvent};
+use winit::event_loop::EventLoopProxy;
+
+use crate::app::AppEvent;
 
 /// The `<canvas id="app">` from `web/index.html`.
 pub fn canvas() -> Option<HtmlCanvasElement> {
@@ -82,6 +85,28 @@ pub fn release_tab_at_edges(leaves: Rc<Cell<[bool; 2]>>) {
         listener.as_ref().unchecked_ref(),
         true,
     );
+    // Lives as long as the page.
+    listener.forget();
+}
+
+/// Makes the page's Skills link (`#skills-link`) fly to the skill map in
+/// place, instead of reloading the page at `?station=skills` (its `href`,
+/// the fallback), and hands keyboard focus back to the canvas.
+pub fn on_skills_link(proxy: EventLoopProxy<AppEvent>) {
+    let Some(link) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id("skills-link"))
+    else {
+        return;
+    };
+    let listener = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+        event.prevent_default();
+        let _ = proxy.send_event(AppEvent::ToggleSkills);
+        if let Some(canvas) = canvas() {
+            let _ = canvas.focus();
+        }
+    });
+    let _ = link.add_event_listener_with_callback("click", listener.as_ref().unchecked_ref());
     // Lives as long as the page.
     listener.forget();
 }

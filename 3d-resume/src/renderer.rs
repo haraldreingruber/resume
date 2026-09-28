@@ -1,6 +1,6 @@
-//! Draws a frame: gradient background, the scene's shapes, the intro
-//! particles and the MSDF glyphs, then the screen-space layer (native
-//! buttons) on top. Draws into any texture view: the window surface or an
+//! Draws a frame: gradient background, the scene's lines (skill map) and
+//! shapes, the intro particles and the MSDF glyphs, then the screen-space
+//! layer (native buttons) on top. Draws into any texture view: the window surface or an
 //! offscreen screenshot target.
 
 use bytemuck::{Pod, Zeroable};
@@ -9,8 +9,11 @@ use wgpu::util::DeviceExt;
 
 use crate::gpu::Context;
 use crate::intro::Step;
+use crate::lines::LineInstance;
 use crate::particles::Particles;
-use crate::scene::{Camera, FAR_FADE, MAX_GROUPS, NEAR_FADE, Scene, TITLE_GROUP};
+use crate::scene::{
+    Camera, FAR_FADE, MAP_DIM, MAX_GROUPS, NEAR_FADE, Relations, Scene, TITLE_GROUP,
+};
 use crate::shapes::ShapeInstance;
 use crate::text::{self, GlyphInstance};
 use crate::ui::UiLayer;
@@ -33,6 +36,7 @@ struct Layer {
     bind_group: wgpu::BindGroup,
     glyphs: Instances,
     shapes: Instances,
+    lines: Instances,
 }
 
 /// An instance buffer, `None` when empty (wgpu buffers can't be empty).
@@ -63,8 +67,10 @@ pub struct Renderer {
     background: wgpu::RenderPipeline,
     text: wgpu::RenderPipeline,
     shapes: wgpu::RenderPipeline,
+    lines: wgpu::RenderPipeline,
     /// Per hover group: `x` = highlight, `y` = keyboard focus (focus ring),
-    /// `z` = fade-out (the title while the particles form it).
+    /// `z` = fade-out (the title while the particles form it; skill-map
+    /// nodes unrelated to the active one), `w` = the skill map's active node.
     groups: wgpu::Buffer,
     group_state: GroupState,
     world: Layer,
@@ -78,6 +84,7 @@ struct GroupState {
     hovered: Option<u32>,
     focused: Option<u32>,
     title_opacity: f32,
+    relations: Option<Relations>,
 }
 
 impl Renderer {
@@ -131,7 +138,10 @@ impl Renderer {
                 uniform(3),
             ],
         });
-        let layer = |label: &str, glyphs: &[GlyphInstance], shapes: &[ShapeInstance]| {
+        let layer = |label: &str,
+                     glyphs: &[GlyphInstance],
+                     shapes: &[ShapeInstance],
+                     lines: &[LineInstance]| {
             let globals = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
                 size: size_of::<Globals>() as u64,
@@ -165,10 +175,11 @@ impl Renderer {
                 bind_group,
                 glyphs: Instances::new(device, "glyphs", glyphs),
                 shapes: Instances::new(device, "shapes", shapes),
+                lines: Instances::new(device, "lines", lines),
             }
         };
-        let world = layer("world", &scene.glyphs, &scene.shapes);
-        let ui = layer("ui", &[], &[]);
+        let world = layer("world", &scene.glyphs, &scene.shapes, &scene.lines);
+        let ui = layer("ui", &[], &[], &[]);
 
         let scene_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("scene"),
@@ -196,6 +207,18 @@ impl Renderer {
             size_of::<ShapeInstance>(),
             &wgpu::vertex_attr_array![
                 0 => Float32x4, 1 => Float32x4, 2 => Float32, 3 => Float32, 4 => Float32, 5 => Uint32
+            ],
+        );
+        let lines_shader =
+            device.create_shader_module(wgpu::include_wgsl!("../shaders/lines.wgsl"));
+        let lines = instanced_pipeline(
+            ctx,
+            "lines",
+            &scene_layout,
+            &lines_shader,
+            size_of::<LineInstance>(),
+            &wgpu::vertex_attr_array![
+                0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Uint32x2
             ],
         );
 
@@ -236,11 +259,13 @@ impl Renderer {
             background,
             text,
             shapes,
+            lines,
             groups,
             group_state: GroupState {
                 hovered: None,
                 focused: None,
                 title_opacity: 1.0,
+                relations: None,
             },
             world,
             ui,
@@ -255,10 +280,18 @@ impl Renderer {
     }
 
     /// Highlights the hovered and the keyboard-focused group (a link or
-    /// button) and shows the focused one's focus ring.
-    pub fn set_groups(&mut self, ctx: &Context, hovered: Option<u32>, focused: Option<u32>) {
+    /// button), shows the focused one's focus ring, and the skill map's
+    /// `relations` (if a map node is active).
+    pub fn set_groups(
+        &mut self,
+        ctx: &Context,
+        hovered: Option<u32>,
+        focused: Option<u32>,
+        relations: Option<Relations>,
+    ) {
         self.group_state.hovered = hovered;
         self.group_state.focused = focused;
+        self.group_state.relations = relations;
         self.write_groups(ctx);
     }
 
@@ -275,8 +308,27 @@ impl Renderer {
             hovered,
             focused,
             title_opacity,
+            ref relations,
         } = self.group_state;
         let mut state = [[0.0f32; 4]; MAX_GROUPS];
+        if let Some(Relations {
+            active,
+            related,
+            nodes,
+        }) = relations
+        {
+            for group in nodes.clone().filter(|&g| (g as usize) < MAX_GROUPS) {
+                let entry = &mut state[group as usize];
+                if group == *active || related.contains(&group) {
+                    entry[0] = 1.0;
+                } else {
+                    entry[2] = MAP_DIM;
+                }
+            }
+            if let Some(entry) = state.get_mut(*active as usize) {
+                entry[3] = 1.0;
+            }
+        }
         for (group, focus) in [(hovered, 0.0), (focused, 1.0)] {
             if let Some(entry) = group
                 .filter(|&g| g != 0)
@@ -351,6 +403,8 @@ impl Renderer {
 
             for (layer, world) in [(&self.world, true), (&self.ui, false)] {
                 pass.set_bind_group(0, &layer.bind_group, &[]);
+                pass.set_pipeline(&self.lines);
+                layer.lines.draw(&mut pass);
                 pass.set_pipeline(&self.shapes);
                 layer.shapes.draw(&mut pass);
                 // Under the text, so the settled particles hide behind the
@@ -433,4 +487,37 @@ fn atlas_texture(ctx: &Context, pixels: &[u8]) -> wgpu::Texture {
         wgpu::util::TextureDataOrder::LayerMajor,
         pixels,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    /// Every shader parses and validates. A broken shader otherwise only
+    /// shows when the app creates its pipelines on a GPU.
+    #[test]
+    fn shaders_are_valid() {
+        let shaders = [
+            (
+                "background.wgsl",
+                include_str!("../shaders/background.wgsl"),
+            ),
+            ("text.wgsl", include_str!("../shaders/text.wgsl")),
+            ("shapes.wgsl", include_str!("../shaders/shapes.wgsl")),
+            ("lines.wgsl", include_str!("../shaders/lines.wgsl")),
+            ("particles.wgsl", include_str!("../shaders/particles.wgsl")),
+            (
+                "particles_sim.wgsl",
+                include_str!("../shaders/particles_sim.wgsl"),
+            ),
+        ];
+        for (name, source) in shaders {
+            let module = naga::front::wgsl::parse_str(source)
+                .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(source)));
+            naga::valid::Validator::new(
+                naga::valid::ValidationFlags::all(),
+                naga::valid::Capabilities::default(),
+            )
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        }
+    }
 }

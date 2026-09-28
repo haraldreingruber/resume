@@ -169,6 +169,7 @@ impl Normalizer {
             id: self.id(path, work.id),
             position: self.text(&format!("{path}.position"), work.position),
             organization: self.text(&format!("{path}.name"), work.name),
+            short_name: work.short.map(|s| self.text(&format!("{path}.x-short"), s)),
             location: self.whereabouts(path, work.place, work.remote),
             dates: self.date_range(path, &work.start_date, work.end_date.as_deref()),
             summary: work
@@ -193,6 +194,9 @@ impl Normalizer {
                 .entity
                 .map(|e| self.text(&format!("{path}.entity"), e)),
             title: self.text(&format!("{path}.name"), project.name),
+            short_name: project
+                .short
+                .map(|s| self.text(&format!("{path}.x-short"), s)),
             description: project
                 .description
                 .map(|d| self.rich(&format!("{path}.description"), &d)),
@@ -580,6 +584,17 @@ basics:
         ))
         .unwrap();
         assert_eq!(resume.work[0].position, "Dev – Web");
+    }
+
+    #[test]
+    fn short_labels_fall_back_to_the_company_name() {
+        let resume = load_str(&with_work(concat!(
+            "  - { x-id: a, position: Dev, name: Acme Corporation, startDate: '2020' }\n",
+            "  - { x-id: b, position: Dev, name: Acme Corporation, x-short: Acme -- Web, startDate: '2020' }\n",
+        )))
+        .unwrap();
+        assert_eq!(resume.work[0].short_label(), "Acme Corporation");
+        assert_eq!(resume.work[1].short_label(), "Acme – Web");
     }
 
     #[test]

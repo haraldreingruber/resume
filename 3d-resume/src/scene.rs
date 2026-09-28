@@ -1,6 +1,6 @@
 //! The timeline scene: an intro, then every work, project and education entry
-//! with the most recent first, then an outro with languages and contact
-//! links. Stations lie along a gently winding path into the screen (-z); the
+//! with the most recent first, then the skill map, then an outro with
+//! languages and contact links. Stations lie along a gently winding path into the screen (-z); the
 //! camera flies along a Catmull-Rom spline through them, so scrolling forward
 //! travels back in time.
 
@@ -9,7 +9,9 @@ use std::ops::Range;
 use glam::{Mat4, Vec2, Vec3};
 use resume_model::{DateRange, Education, PartialDate, Project, Resume, RichText, Work};
 
+use crate::lines::{self, LineInstance};
 use crate::shapes::ShapeInstance;
+use crate::skillmap::{self, NodeKind};
 use crate::text::{self, Font, GlyphInstance, Run, TextStyle, rgb, rgb_bytes};
 
 /// Distance between stations along -z.
@@ -28,6 +30,10 @@ const FOV_Y: f32 = 50.0_f32.to_radians();
 const FLOOR_Y: f32 = -2.4;
 /// Top of the year labels, just above the bottom of the screen.
 const YEAR_TOP_Y: f32 = -1.62;
+/// Half the width of the skill map (wider than a text station).
+const MAP_HALF_WIDTH: f32 = 2.2;
+/// How much a skill-map node not related to the active one fades out.
+pub const MAP_DIM: f32 = 0.7;
 
 /// Content fades in/out relative to the focus distance: stations the camera
 /// passes fade out, the next one fades in as the camera approaches. Shared
@@ -48,14 +54,44 @@ const PATH: [f32; 4] = rgb(0x3E5A73);
 const CODE: [f32; 4] = rgb(0xE2C08D);
 /// Station accents when an entry has no `x-color`, derived from the PDF blues.
 const PALETTE: [[f32; 4]; 4] = [rgb(0x6DB3E8), rgb(0x8CC4EF), rgb(0x6FC2C9), rgb(0x9AB6E8)];
+/// Skill group colors on the skill map.
+const MAP_COLORS: [[f32; 4]; 5] = [
+    rgb(0x6DB3E8),
+    rgb(0x6FC2C9),
+    rgb(0xE2C08D),
+    rgb(0xB7A6E8),
+    rgb(0x9AB6E8),
+];
 
-/// What clicking a link does.
+/// What activating a hover group (click, tap, Enter) does.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
-    OpenUrl(String),
+    /// Opens something outside the app (see `links`).
+    Open(Link),
+    /// Flies to a station (an entry on the skill map).
+    GoToStation(usize),
+    /// Pins a skill's connections on the skill map (touch has no hover).
+    Pin,
+    /// Flies to the skill map, or back to where you came from.
+    ToggleSkills,
+}
+
+/// Something outside the app.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Link {
+    Url(String),
     /// The plain HTML version (native: embedded copy; web: the HTML nav).
     TextVersion,
     Pdf,
+}
+
+/// The skill map's highlight: the active node and its neighbors stand out,
+/// the other nodes (`nodes`) dim.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Relations {
+    pub active: u32,
+    pub related: Vec<u32>,
+    pub nodes: Range<u32>,
 }
 
 pub struct Scene {
@@ -65,10 +101,14 @@ pub struct Scene {
     /// Glyphs and shapes are ordered far to near (drawn without depth buffer).
     pub glyphs: Vec<GlyphInstance>,
     pub shapes: Vec<ShapeInstance>,
+    pub lines: Vec<LineInstance>,
     hits: Vec<Hit>,
     /// `actions[group - 1]` is what clicking hover group `group` does.
     actions: Vec<Action>,
     pub title: Title,
+    /// Skill-map links as (entry node, skill node) hover groups.
+    edges: Vec<(u32, u32)>,
+    skills_station: usize,
 }
 
 /// The name on the intro, which the particles form.
@@ -115,10 +155,11 @@ impl Station {
     }
 }
 
-/// One station's glyphs and shapes, and the hover groups of its links.
+/// One station's glyphs, shapes and lines, and the hover groups of its links.
 struct Block {
     glyphs: Vec<GlyphInstance>,
     shapes: Vec<ShapeInstance>,
+    lines: Vec<LineInstance>,
     links: Range<u32>,
 }
 
@@ -204,7 +245,9 @@ fn timeline(resume: &Resume) -> Vec<Entry<'_>> {
 impl Scene {
     pub fn new(resume: &Resume) -> Self {
         let entries = timeline(resume);
-        let count = entries.len() + 2;
+        // Intro, entries, skill map, outro.
+        let count = entries.len() + 3;
+        let skills_station = count - 2;
         let anchor = |i: usize| {
             let side = match i {
                 0 => 0.0,
@@ -221,6 +264,7 @@ impl Scene {
                 .enumerate()
                 .map(|(i, entry)| Station::new(entry.id(), anchor(i + 1))),
         );
+        stations.push(Station::new("skills", anchor(skills_station)));
         stations.push(Station::new("outro", anchor(count - 1)));
 
         // Build each station, then emit them far to near so that nearer
@@ -240,6 +284,14 @@ impl Scene {
                 b.year_label(&entry.year_label(), station.anchor);
             }));
         }
+        let stationed: Vec<(usize, Entry)> = entries
+            .iter()
+            .enumerate()
+            .map(|(i, &entry)| (i + 1, entry))
+            .collect();
+        blocks.push(
+            builder.take(|b| b.skill_map(resume, &stationed, stations[skills_station].anchor)),
+        );
         blocks.push(builder.take(|b| b.outro(resume, stations[count - 1].anchor)));
 
         let points: Vec<Vec3> = stations.iter().map(|s| s.anchor).collect();
@@ -253,21 +305,51 @@ impl Scene {
         );
         let mut glyphs = Vec::new();
         let mut shapes = Vec::new();
+        let mut lines = Vec::new();
         for (i, block) in blocks.into_iter().enumerate().rev() {
             stations[i].links = block.links;
             shapes.extend(path_dots(&points, i));
             shapes.extend(block.shapes);
             glyphs.extend(block.glyphs);
+            lines.extend(block.lines);
         }
         Self {
             stations,
             points,
             glyphs,
             shapes,
+            lines,
             hits: builder.hits,
             actions: builder.actions,
             title,
+            edges: builder.edges,
+            skills_station,
         }
+    }
+
+    /// The station of the skill map.
+    pub fn skills_station(&self) -> usize {
+        self.skills_station
+    }
+
+    /// The highlight when `active` is a skill-map node: its neighbors light
+    /// up, the rest of the map dims. `None` for anything else.
+    pub fn relations(&self, active: Option<u32>) -> Option<Relations> {
+        let active = active?;
+        let nodes = self.links(self.skills_station);
+        nodes.contains(&active).then(|| Relations {
+            active,
+            related: self
+                .edges
+                .iter()
+                .filter_map(|&(entry, skill)| match active {
+                    a if a == entry => Some(skill),
+                    a if a == skill => Some(entry),
+                    _ => None,
+                })
+                .collect(),
+            nodes,
+        })
     }
 
     pub fn station_count(&self) -> usize {
@@ -369,24 +451,27 @@ fn add_action(actions: &mut Vec<Action>, action: Action) -> u32 {
     actions.len() as u32
 }
 
-/// Accumulates one station's glyphs and shapes; hits and actions (hover
-/// groups) accumulate over the whole scene.
+/// Accumulates one station's glyphs, shapes and lines; hits, actions (hover
+/// groups) and skill-map edges accumulate over the whole scene.
 #[derive(Default)]
 struct Builder {
     glyphs: Vec<GlyphInstance>,
     shapes: Vec<ShapeInstance>,
+    lines: Vec<LineInstance>,
     hits: Vec<Hit>,
     actions: Vec<Action>,
+    edges: Vec<(u32, u32)>,
 }
 
 impl Builder {
-    /// Runs `build` and returns the glyphs, shapes and links it added.
+    /// Runs `build` and returns the glyphs, shapes, lines and links it added.
     fn take(&mut self, build: impl FnOnce(&mut Self)) -> Block {
         let first = self.actions.len() as u32 + 1;
         build(self);
         Block {
             glyphs: std::mem::take(&mut self.glyphs),
             shapes: std::mem::take(&mut self.shapes),
+            lines: std::mem::take(&mut self.lines),
             links: first..self.actions.len() as u32 + 1,
         }
     }
@@ -411,7 +496,7 @@ impl Builder {
             .iter()
             .map(|span| {
                 let group = span.link.as_ref().map_or(0, |url| {
-                    add_action(&mut self.actions, Action::OpenUrl(url.clone()))
+                    add_action(&mut self.actions, Action::Open(Link::Url(url.clone())))
                 });
                 let color = if group != 0 || span.style.italic {
                     accent
@@ -581,7 +666,7 @@ impl Builder {
             &mut cursor,
         );
         self.text(
-            "Double-click or press F for fullscreen",
+            "Press S for the skill map, F (or double-click) for fullscreen",
             hint,
             0.0,
             &mut cursor,
@@ -674,12 +759,12 @@ impl Builder {
 
         let link_style = TextStyle::new(Font::Regular, 0.09, accent).centered();
         let basics = &resume.basics;
-        let email = Action::OpenUrl(format!("mailto:{}", basics.email));
+        let email = Action::Open(Link::Url(format!("mailto:{}", basics.email)));
         self.link(&basics.email, email, link_style, 0.1, &mut cursor);
         for (label, profile) in basics.labeled_profiles() {
             self.link(
                 &label,
-                Action::OpenUrl(profile.url.clone()),
+                Action::Open(Link::Url(profile.url.clone())),
                 link_style,
                 0.1,
                 &mut cursor,
@@ -688,6 +773,121 @@ impl Builder {
         cursor.y -= 0.25;
         let hint = TextStyle::new(Font::Regular, 0.07, MUTED).centered();
         self.text("Press Home to return to the start", hint, 0.0, &mut cursor);
+    }
+
+    /// The skill map: skills by group and the jobs and projects that used
+    /// them (from `entries`, with their stations), linked by curves. Entries
+    /// fly to their station when activated; skills pin their connections.
+    fn skill_map(&mut self, resume: &Resume, entries: &[(usize, Entry)], anchor: Vec3) {
+        let (left, z) = (anchor.x - MAP_HALF_WIDTH, anchor.z);
+        let mut cursor = Vec3::new(left, anchor.y + 0.55, z);
+        let title = TextStyle::new(Font::Bold, 0.16, NAME);
+        self.text("Skills", title, 0.04, &mut cursor);
+        let hint = TextStyle::new(Font::Regular, 0.065, MUTED);
+        self.text(
+            "Hover, tap or Tab through the map to see where each skill was used",
+            hint,
+            0.0,
+            &mut cursor,
+        );
+
+        let map_entries: Vec<skillmap::Entry> = entries
+            .iter()
+            .filter_map(|&(station, entry)| {
+                let (label, skills) = match entry {
+                    Entry::Job(work) => (work.short_label(), &work.skills),
+                    Entry::Project(project) => (project.short_label(), &project.skills),
+                    Entry::Education(_) => return None,
+                };
+                (!skills.is_empty()).then_some(skillmap::Entry {
+                    label,
+                    station,
+                    skills,
+                })
+            })
+            .collect();
+        let groups: Vec<skillmap::Group> = resume
+            .skills
+            .iter()
+            .map(|group| skillmap::Group {
+                name: &group.name,
+                keywords: &group.keywords,
+            })
+            .collect();
+        let area = [
+            left,
+            anchor.y - 2.1,
+            anchor.x + MAP_HALF_WIDTH,
+            cursor.y - 0.12,
+        ];
+        let map = skillmap::layout(&map_entries, &groups, area);
+
+        // Groups in reading order: entries top to bottom, then the skills.
+        let node_groups: Vec<u32> = map
+            .nodes
+            .iter()
+            .map(|node| {
+                let action = match node.kind {
+                    NodeKind::Entry { station } => Action::GoToStation(station),
+                    NodeKind::Skill { .. } => Action::Pin,
+                };
+                add_action(&mut self.actions, action)
+            })
+            .collect();
+        let color = |kind: NodeKind| match kind {
+            NodeKind::Entry { .. } => NAME,
+            NodeKind::Skill { group } => MAP_COLORS[group % MAP_COLORS.len()],
+        };
+        for (i, heading) in map.headings.iter().enumerate() {
+            let style = TextStyle {
+                color: MAP_COLORS[i % MAP_COLORS.len()],
+                ..heading.style
+            };
+            text::layout(&heading.text, style, heading.at.extend(z), &mut self.glyphs);
+        }
+        for &(entry, skill) in &map.edges {
+            let [r, g, b, _] = color(map.nodes[skill].kind);
+            let groups = [node_groups[entry], node_groups[skill]];
+            self.lines.extend(lines::curve(
+                map.nodes[entry].dot.extend(z),
+                map.nodes[skill].dot.extend(z),
+                0.006,
+                [r, g, b, 0.28],
+                groups,
+                16,
+            ));
+            self.edges.push((groups[0], groups[1]));
+        }
+        for (node, &group) in map.nodes.iter().zip(&node_groups) {
+            let [r, g, b, _] = color(node.kind);
+            // A glowing dot: faint halo, bright core.
+            let dot = node.dot.to_array();
+            self.shapes
+                .push(ShapeInstance::dot(dot, z, 0.045, [r, g, b, 0.16]).group(group));
+            self.shapes
+                .push(ShapeInstance::dot(dot, z, 0.017, [r, g, b, 1.0]).group(group));
+            let style = TextStyle {
+                color: BODY,
+                group,
+                ..node.label.style
+            };
+            text::layout(
+                &node.label.text,
+                style,
+                node.label.at.extend(z),
+                &mut self.glyphs,
+            );
+            let rect = node.bounds;
+            self.shapes.push(ShapeInstance::focus_ring(
+                rect,
+                z,
+                0.04,
+                0.006,
+                [r, g, b, 1.0],
+                group,
+            ));
+            self.hits.push(Hit { rect, z, group });
+        }
     }
 
     /// The entry's year on the floor below the station.
@@ -764,6 +964,7 @@ mod tests {
                 "exchange-uab",
                 "final-year-project",
                 "bsc-hagenberg",
+                "skills",
                 "outro",
             ]
         );
@@ -797,9 +998,9 @@ mod tests {
             .collect();
         assert_eq!(
             targets.first(),
-            Some(&&Action::OpenUrl(
+            Some(&&Action::Open(Link::Url(
                 "mailto:harald.reingruber@gmail.com".into()
-            ))
+            )))
         );
         assert_eq!(targets.len(), 4);
         // Every clickable group belongs to exactly one station.
@@ -819,9 +1020,39 @@ mod tests {
         assert!(title.bounds[0] < title.bounds[2] && title.bounds[1] < title.bounds[3]);
         assert_eq!(scene.action(TITLE_GROUP), None);
         // Adding actions never hands out the title's group.
-        while let group @ 1.. = scene.add_action(Action::Pdf) {
+        while let group @ 1.. = scene.add_action(Action::Open(Link::Pdf)) {
             assert!(group < TITLE_GROUP);
         }
+    }
+
+    #[test]
+    fn the_skill_map_relates_entries_and_skills_both_ways() {
+        let resume = crate::content::resume();
+        let scene = Scene::new(&resume);
+        let skills = scene.skills_station();
+        assert_eq!(scene.station_id(skills), Some("skills"));
+        let nodes = scene.links(skills);
+        // The first node is the most recent entry with skills: Dedalus.
+        let dedalus = nodes.start;
+        assert_eq!(
+            scene.action(dedalus),
+            Some(&Action::GoToStation(
+                scene.station_index("dedalus").unwrap()
+            ))
+        );
+        let relations = scene.relations(Some(dedalus)).unwrap();
+        assert_eq!(relations.related.len(), resume.work[0].skills.len());
+        assert_eq!(relations.nodes, nodes);
+        // Each of its skills leads back to it.
+        for &skill in &relations.related {
+            assert_eq!(scene.action(skill), Some(&Action::Pin));
+            let back = scene.relations(Some(skill)).unwrap();
+            assert!(back.related.contains(&dedalus));
+        }
+        // Outside the map: no relations.
+        let outro = scene.links(scene.station_count() - 1).start;
+        assert_eq!(scene.relations(Some(outro)), None);
+        assert_eq!(scene.relations(None), None);
     }
 
     #[test]
@@ -847,7 +1078,7 @@ mod tests {
             .actions
             .iter()
             .filter_map(|a| match a {
-                Action::OpenUrl(url) => Some(url.as_str()),
+                Action::Open(Link::Url(url)) => Some(url.as_str()),
                 _ => None,
             })
             .collect();
@@ -870,8 +1101,13 @@ mod tests {
         let lens = Scene::lens(16.0 / 9.0);
         let outro = scene.station_count() - 1;
         let camera = scene.camera(outro as f32, &lens);
-        // Project the center of the first hit region to NDC and pick there.
-        let hit = &scene.hits[0];
+        // Project the center of an outro link region to NDC and pick there.
+        let links = scene.links(outro);
+        let hit = scene
+            .hits
+            .iter()
+            .find(|hit| links.contains(&hit.group))
+            .unwrap();
         let center = Vec3::new(
             (hit.rect[0] + hit.rect[2]) / 2.0,
             (hit.rect[1] + hit.rect[3]) / 2.0,

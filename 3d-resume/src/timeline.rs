@@ -54,6 +54,11 @@ impl Timeline {
         self.target = (current + direction as f32).clamp(0.0, self.last);
     }
 
+    /// Flies to a station (clamped to the last one).
+    pub fn go_to(&mut self, station: usize) {
+        self.target = (station as f32).min(self.last);
+    }
+
     pub fn go_to_start(&mut self) {
         self.target = 0.0;
     }
@@ -92,6 +97,17 @@ mod tests {
         timeline.scroll(0.6);
         while timeline.update(1.0 / 60.0) {}
         assert_eq!(timeline.nearest(), 2);
+    }
+
+    #[test]
+    fn goes_to_a_station() {
+        let mut timeline = Timeline::new(5);
+        timeline.go_to(3);
+        while timeline.update(1.0 / 60.0) {}
+        assert_eq!(timeline.nearest(), 3);
+        timeline.go_to(99);
+        while timeline.update(1.0 / 60.0) {}
+        assert_eq!(timeline.nearest(), 4);
     }
 
     #[test]

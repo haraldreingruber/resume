@@ -19,6 +19,8 @@
 #   Worldwide ("Remote (Worldwide)").
 # - x-skills: skills used, as exact keywords from the skills section.
 # - x-color: optional accent color (#RRGGBB) for the 3D resume.
+# - x-short: optional short name for the 3D skill map (defaults to the
+#   company name, or the project type).
 
 basics:
   name: Harald Reingruber
@@ -57,6 +59,7 @@ work:
     x-skills: [Rust, TypeScript/JavaScript, C++, WebGL/OpenGL, WebAssembly/Emscripten, Web Components, Playwright, Storybook]
     position: Medical 3D Visualization Expert
     name: Dedalus HealthCare DACH
+    x-short: Dedalus HealthCare
     x-place: scharnstein
     x-remote: true
     startDate: "2020-11"
@@ -87,6 +90,7 @@ work:
     x-skills: [Unit Testing & TDD, Continuous Improvement, Clean Code]
     position: Pair & Mob-Programming Tour (Apprenticeship)
     name: Self-employed
+    x-short: Mob-Programming Tour
     x-remote: Worldwide
     startDate: "2019-11"
     endDate: "2020-05"
@@ -155,6 +159,7 @@ work:
     x-skills: [C++, SIMD (SSE/AVX/Neon), WebGL/OpenGL, Image Processing]
     position: 3D Volume Rendering Engineer (C++)
     name: Agfa HealthCare
+    x-short: Agfa · Volume Rendering
     x-place: vienna
     startDate: "2013-10"
     endDate: "2015-04"
@@ -175,6 +180,7 @@ work:
     x-skills: [Java, Image Processing]
     position: Software Engineer, 3D Visualization (Java)
     name: Agfa HealthCare
+    x-short: Agfa · 3D Visualization
     x-place: vienna
     startDate: "2010-09"
     endDate: "2013-09"

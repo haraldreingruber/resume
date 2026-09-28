@@ -84,10 +84,12 @@ pub struct GlyphInstance {
     pub group: u32,
 }
 
+/// Horizontal alignment relative to the layout position's x.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Align {
     Left,
     Center,
+    Right,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -123,6 +125,11 @@ impl TextStyle {
 
     pub fn centered(mut self) -> Self {
         self.align = Align::Center;
+        self
+    }
+
+    pub fn right_aligned(mut self) -> Self {
+        self.align = Align::Right;
         self
     }
 
@@ -204,8 +211,33 @@ fn wrap(chars: &[StyledChar], size: f32, max_width: Option<f32>) -> Vec<Range<us
     lines
 }
 
+/// The size (width of the widest line, height) `text` takes up in `style`.
+pub fn measure(text: &str, style: TextStyle) -> [f32; 2] {
+    let chars: Vec<StyledChar> = text
+        .chars()
+        .map(|ch| StyledChar {
+            ch,
+            font: style.font,
+            run: 0,
+        })
+        .collect();
+    let lines = wrap(&chars, style.size, style.max_width);
+    let width = lines
+        .iter()
+        .map(|line| chars_width(&chars[line.clone()], style.size))
+        .fold(0.0, f32::max);
+    [width, block_height(lines.len(), style)]
+}
+
+fn block_height(lines: usize, style: TextStyle) -> f32 {
+    let m = metrics(style.font);
+    let line_advance = m.line_height * style.line_spacing * style.size;
+    (lines as f32 - 1.0) * line_advance + (m.ascender - m.descender) * style.size
+}
+
 /// Lays out `text` with its first line's top at `top_left` (for centered
-/// text, `top_left.x` is the center). Returns the block height.
+/// text, `top_left.x` is the center; for right-aligned text, the right
+/// edge). Returns the block height.
 pub fn layout(text: &str, style: TextStyle, top_left: Vec3, out: &mut Vec<GlyphInstance>) -> f32 {
     let run = Run {
         text,
@@ -246,6 +278,7 @@ pub fn layout_runs(
         let mut pen = match style.align {
             Align::Left => top_left.x,
             Align::Center => top_left.x - chars_width(line_chars, size) / 2.0,
+            Align::Right => top_left.x - chars_width(line_chars, size),
         };
         // Box of the run currently being extended: (run, x0).
         let mut open_box: Option<(usize, f32)> = None;
@@ -290,9 +323,8 @@ pub fn layout_runs(
         }
         baseline -= line_advance;
     }
-    let descent = -m.descender * size;
     Paragraph {
-        height: (lines.len() as f32 - 1.0) * line_advance + m.ascender * size + descent,
+        height: block_height(lines.len(), style),
         boxes,
     }
 }
@@ -356,6 +388,29 @@ mod tests {
             glyph(Font::Regular, '\u{a0}').is_some(),
             "non-breaking space (U+00A0) must have a baked glyph"
         );
+    }
+
+    #[test]
+    fn measures_what_layout_draws() {
+        let style = TextStyle::new(Font::Regular, 0.1, [1.0; 4]);
+        // One line: the width is the advance width.
+        assert_eq!(
+            measure("one line", style)[0],
+            width(Font::Regular, 0.1, "one line")
+        );
+        // Wrapped: as wide as the widest line, as tall as the layout.
+        let wrapped = style.wrap(0.5);
+        let text = "a few words that need wrapping";
+        let [widest, height] = measure(text, wrapped);
+        assert!(widest <= 0.5 && widest >= width(Font::Regular, 0.1, "wrapping"));
+        let mut glyphs = Vec::new();
+        assert_eq!(layout(text, wrapped, Vec3::ZERO, &mut glyphs), height);
+        // Right-aligned lines end at the layout position (glyph quads reach
+        // past the advance by the atlas padding, under 0.1 em).
+        let mut glyphs = Vec::new();
+        layout("end", style.right_aligned(), Vec3::ZERO, &mut glyphs);
+        assert!(glyphs.iter().all(|g| g.rect[2] <= 0.01));
+        assert!(glyphs.iter().any(|g| g.rect[2] > -0.01));
     }
 
     #[test]
