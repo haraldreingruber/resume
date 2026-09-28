@@ -42,7 +42,7 @@ Specialist in medical 3D visualization, real-time graphics, and augmented realit
 - **Graphics & 3D:** WebGL/OpenGL, WebAssembly/Emscripten, Unity 3D
 - **Imaging & Vision:** OpenCV, SIMD (SSE/AVX/Neon), Image Processing
 - **Web & Tooling:** Node.js, Web Components, Playwright, Storybook, Docker
-- **Engineering Practices:** Unit Testing, TDD, E2E Testing, Pair-/Mob-Programming, Clean Code, Scrum, Kanban, AI-Driven Development (Copilot, Claude Code, OpenSpec)
+- **Engineering Practices:** Unit Testing, E2E Testing, Test-driven Development (TDD), Pair-/Mob-Programming, Clean Code, Scrum, Kanban, AI-Driven Development (Copilot, Claude Code, OpenSpec)
 
 ## Education
 
