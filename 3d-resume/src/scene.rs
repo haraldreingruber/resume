@@ -146,6 +146,8 @@ pub enum Action {
     Pin,
     /// Flies to the skill map, or back to where you came from.
     ToggleSkills,
+    /// Opens or closes the About panel ("How this resume is built").
+    ToggleAbout,
 }
 
 /// Something outside the app.
@@ -501,7 +503,9 @@ impl Scene {
         };
         Some(match action {
             Action::Open(Link::Url(_)) => format!("{label}, link"),
-            Action::Open(_) | Action::ToggleSkills => format!("{label}, button"),
+            Action::Open(_) | Action::ToggleSkills | Action::ToggleAbout => {
+                format!("{label}, button")
+            }
             Action::GoToStation(_) => format!("{label}: {}. Press Enter to go there.", related()),
             Action::Pin => match related() {
                 used if used.is_empty() => label.clone(),
@@ -820,7 +824,10 @@ impl Builder {
             .wrap(self.m.block_width)
             .line_spacing(1.15);
         self.rich(&basics.summary, summary, PALETTE[0], 0.35, &mut cursor);
-        let hint = self.style(Font::Regular, 0.07, MUTED).centered();
+        let hint = self
+            .style(Font::Regular, 0.07, MUTED)
+            .centered()
+            .wrap(self.m.tagline_width);
         self.text(
             "Scroll, swipe or use the arrow keys to travel back in time",
             hint,
@@ -828,7 +835,13 @@ impl Builder {
             &mut cursor,
         );
         self.text(
-            "Press S for the skill map, F (or double-click) for fullscreen",
+            "Press S for the skill map, I for how it's built",
+            hint,
+            0.05,
+            &mut cursor,
+        );
+        self.text(
+            "F or a double-click toggles fullscreen",
             hint,
             0.0,
             &mut cursor,

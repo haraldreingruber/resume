@@ -37,10 +37,14 @@ pub fn step(current: Option<usize>, count: usize, forward: bool, wrap: bool) -> 
     }
 }
 
-/// The focus targets at a station: its links, then the screen-space buttons.
-pub fn targets(scene: &Scene, station: usize, buttons: &[(&str, u32)]) -> Vec<u32> {
-    scene
-        .links(station)
+/// The focus targets at a station: the open About panel's links (`panel`,
+/// first, so one Tab reaches them after opening it), the station's links,
+/// then the screen-space buttons.
+pub fn targets(scene: &Scene, station: usize, panel: &[u32], buttons: &[(&str, u32)]) -> Vec<u32> {
+    panel
+        .iter()
+        .copied()
+        .chain(scene.links(station))
         .chain(buttons.iter().map(|&(_, group)| group))
         .filter(|&group| group != 0)
         .collect()
@@ -75,11 +79,16 @@ mod tests {
         let mut scene = Scene::new(&crate::content::resume());
         let outro = scene.station_count() - 1;
         let pdf = scene.add_action(crate::scene::Action::Open(crate::scene::Link::Pdf), "PDF");
-        let targets = targets(&scene, outro, &[("PDF", pdf)]);
+        let targets = targets(&scene, outro, &[], &[("PDF", pdf)]);
         assert_eq!(targets.len(), scene.links(outro).len() + 1);
         assert_eq!(targets.last(), Some(&pdf));
         // The buttons are targets at every station.
-        let intro = super::targets(&scene, 0, &[("PDF", pdf)]);
+        let intro = super::targets(&scene, 0, &[], &[("PDF", pdf)]);
         assert_eq!(intro.len(), scene.links(0).len() + 1);
+        // The open panel's links come first.
+        let source = crate::ui::source_link(&mut scene);
+        let open = super::targets(&scene, 0, &[source], &[("PDF", pdf)]);
+        assert_eq!(open[0], source);
+        assert_eq!(open.len(), intro.len() + 1);
     }
 }
