@@ -148,6 +148,8 @@ pub enum Action {
     ToggleSkills,
     /// Opens or closes the About panel ("How this resume is built").
     ToggleAbout,
+    /// Shows or hides the performance overlay.
+    ToggleStats,
 }
 
 /// Something outside the app.
@@ -503,7 +505,7 @@ impl Scene {
         };
         Some(match action {
             Action::Open(Link::Url(_)) => format!("{label}, link"),
-            Action::Open(_) | Action::ToggleSkills | Action::ToggleAbout => {
+            Action::Open(_) | Action::ToggleSkills | Action::ToggleAbout | Action::ToggleStats => {
                 format!("{label}, button")
             }
             Action::GoToStation(_) => format!("{label}: {}. Press Enter to go there.", related()),
