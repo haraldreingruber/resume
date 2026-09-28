@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Harald Reingruber – 3D Resume</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <meta name="description" content="Resume of Harald Reingruber, rendered in 3D with Rust, wgpu and WebGPU.">
 <script>
   // Browsers without WebGPU get the plain HTML resume (generated from the same data).
@@ -34,16 +35,27 @@
   @media (pointer: coarse) { nav a { padding: 14px 16px; } }
   .skip { position: absolute; left: -9999px; }
   .skip:focus { left: 16px; top: 16px; color: #fff; }
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
 </style>
 <!-- wasm-opt needs the wasm features rustc enables by default. -->
 <link data-trunk rel="rust" href="../Cargo.toml" data-bin="resume-3d" data-wasm-opt="z"
       data-wasm-opt-params="--enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-reference-types --enable-multivalue" />
 <link data-trunk rel="copy-file" href="plain.html" />
+<link data-trunk rel="copy-file" href="favicon.svg" />
 </head>
 <body>
-<a class="skip" href="plain.html">Skip to the text version of this resume</a>
-<noscript><p style="color:#fff">This 3D resume needs JavaScript and WebGPU. Read the <a href="plain.html" style="color:#6db3e8">text version</a>.</p></noscript>
-<canvas id="app" aria-label="3D resume timeline. Scroll or use the arrow keys to move through time, Tab to reach its links, S for the skill map, F for fullscreen. A text version is linked below."></canvas>
+<header><a class="skip" href="plain.html">Skip to the text version of this resume</a></header>
+<main>
+  <h1 class="visually-hidden">Harald Reingruber – 3D Resume</h1>
+  <noscript><p style="color:#fff">This 3D resume needs JavaScript and WebGPU. Read the <a href="plain.html" style="color:#6db3e8">text version</a>.</p></noscript>
+  <!-- role="application": the canvas handles arrows, Tab, Enter, S and F itself. -->
+  <canvas id="app" role="application" aria-roledescription="3D resume" aria-label="3D resume timeline. Scroll or use the arrow keys to move through time, Tab to reach its links, S for the skill map, F for fullscreen. A text version is linked below."></canvas>
+  <!-- The app announces the station in view and the focused link here. -->
+  <p id="live" class="visually-hidden" aria-live="polite" aria-atomic="true"></p>
+</main>
 <nav aria-label="Other formats">
   <a href="?station=skills" id="skills-link">Skills</a>
   <a href="plain.html">Text version</a>

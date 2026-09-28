@@ -74,7 +74,7 @@ mod tests {
     fn targets_are_the_station_links_then_the_buttons() {
         let mut scene = Scene::new(&crate::content::resume());
         let outro = scene.station_count() - 1;
-        let pdf = scene.add_action(crate::scene::Action::Open(crate::scene::Link::Pdf));
+        let pdf = scene.add_action(crate::scene::Action::Open(crate::scene::Link::Pdf), "PDF");
         let targets = targets(&scene, outro, &[("PDF", pdf)]);
         assert_eq!(targets.len(), scene.links(outro).len() + 1);
         assert_eq!(targets.last(), Some(&pdf));

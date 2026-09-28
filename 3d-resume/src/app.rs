@@ -75,9 +75,10 @@ pub struct App {
     /// Where S / the Skills button flies back to from the skill map.
     skills_return: Option<usize>,
     modifiers: ModifiersState,
-    /// The station in view, and the one last shown in the address bar.
+    /// The station in view, and the one last shown in the address bar and
+    /// announced to screen readers (none yet at startup).
     station: usize,
-    shown_station: usize,
+    shown_station: Option<usize>,
     /// The particle intro's clock; `None` with reduced motion.
     intro: Option<Intro>,
     /// Whether Tab / Shift+Tab leaves the canvas, read by the page's listener.
@@ -160,7 +161,7 @@ impl App {
             skills_return: None,
             modifiers: ModifiersState::empty(),
             station: start,
-            shown_station: start,
+            shown_station: None,
             // A deep link past the intro skips the assembly.
             intro: (!options.reduced_motion).then(|| Intro::new(start != 0)),
             #[cfg(target_arch = "wasm32")]
@@ -241,14 +242,17 @@ impl App {
                 self.publish_tab_leaves();
             }
         }
-        if settled && station != self.shown_station {
-            self.shown_station = station;
+        if settled && Some(station) != self.shown_station {
+            self.shown_station = Some(station);
             #[cfg(target_arch = "wasm32")]
             crate::web::show_station(
                 Some(station)
                     .filter(|&s| s > 0)
                     .and_then(|s| self.scene.station_id(s)),
             );
+            if let Some(summary) = self.scene.summary(station) {
+                announce(summary);
+            }
         }
     }
 
@@ -279,6 +283,9 @@ impl App {
         self.focused = group;
         self.update_groups();
         self.publish_tab_leaves();
+        if let Some(description) = group.and_then(|g| self.scene.describe(g)) {
+            announce(&description);
+        }
     }
 
     /// Tells the page whether the next Tab / Shift+Tab leaves the canvas.
@@ -673,10 +680,20 @@ impl ApplicationHandler<AppEvent> for App {
     }
 }
 
+/// Tells screen readers (web: the page's live region). The native app has
+/// no screen-reader bridge yet.
+fn announce(text: &str) {
+    #[cfg(target_arch = "wasm32")]
+    crate::web::announce(text);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = text;
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn window_attributes(title: &str) -> winit::window::WindowAttributes {
     Window::default_attributes()
         .with_title(title)
+        .with_window_icon(crate::icon::window_icon())
         .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0))
 }
 

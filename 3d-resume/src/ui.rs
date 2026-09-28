@@ -25,12 +25,12 @@ pub fn native_buttons(scene: &mut Scene) -> Vec<Button> {
         return Vec::new();
     }
     vec![
-        ("Skills", scene.add_action(Action::ToggleSkills)),
+        ("Skills", scene.add_action(Action::ToggleSkills, "Skills")),
         (
             "Text version",
-            scene.add_action(Action::Open(Link::TextVersion)),
+            scene.add_action(Action::Open(Link::TextVersion), "Text version"),
         ),
-        ("PDF", scene.add_action(Action::Open(Link::Pdf))),
+        ("PDF", scene.add_action(Action::Open(Link::Pdf), "PDF")),
     ]
 }
 

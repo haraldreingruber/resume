@@ -128,6 +128,24 @@ pub fn toggle_fullscreen() {
     }
 }
 
+/// Speaks `text` to screen readers through the page's polite live region
+/// (`#live`). The same text again is still announced.
+pub fn announce(text: &str) {
+    let Some(live) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id("live"))
+    else {
+        return;
+    };
+    // Unchanged content isn't announced again: vary it invisibly.
+    let text = if live.text_content().as_deref() == Some(text) {
+        format!("{text}\u{a0}")
+    } else {
+        text.to_owned()
+    };
+    live.set_text_content(Some(&text));
+}
+
 /// Opens a link: `mailto:` in place (the mail client takes over), anything
 /// else in a new tab, falling back to same-tab navigation if a popup blocker
 /// refuses the new tab.

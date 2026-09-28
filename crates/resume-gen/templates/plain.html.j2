@@ -7,6 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ b.name }} – Resume</title>
 <meta name="description" content="{{ b.name }} – {{ b.label }}">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <style>
   :root {
     color-scheme: light dark;
@@ -86,7 +87,7 @@
   article p { margin: 0.35rem 0 0; }
   .tags { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 1rem; padding: 0; list-style: none; }
   .tags li { padding: 0.15rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.92rem; }
-  h4 { margin: 0.8rem 0 0; font-size: 0.95rem; }
+  h3.group { margin: 0.8rem 0 0; font-size: 0.95rem; }
   @media print {
     .actions, .notice { display: none !important; }
     main { padding: 0; }
@@ -151,7 +152,7 @@
       <section aria-labelledby="skills">
         <h2 id="skills">Skills</h2>
         {% for g in resume.skills %}
-        <h4>{{ g.name }}</h4>
+        <h3 class="group">{{ g.name }}</h3>
         <ul class="tags">
           {% for k in g.keywords %}
           <li>{{ k }}</li>
