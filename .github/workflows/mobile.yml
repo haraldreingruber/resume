@@ -1,0 +1,105 @@
+name: Mobile
+
+# Reusable: development builds for phones (no stores, no Apple account).
+# - Android: an APK for arm64 phones and x86_64 emulators, signed with the
+#   stable debug key from the repository secrets (a throwaway key where the
+#   secrets aren't available, e.g. forks). Install it from "unknown apps" or
+#   with `adb install`.
+# - iOS: a Simulator app (Apple silicon Macs); with `smoke_test`, it's
+#   launched in a simulator and screenshotted.
+# Called by ci.yml (every PR and push to main) and release.yml (tags).
+on:
+  workflow_call:
+    inputs:
+      smoke_test:
+        description: Launch the iOS app in a simulator and upload a screenshot.
+        type: boolean
+        default: false
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install toolchain from rust-toolchain.toml
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: Signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          keystore="$RUNNER_TEMP/resume.jks"
+          if [ -n "$KEYSTORE" ]; then
+            echo "$KEYSTORE" | base64 -d > "$keystore"
+          else
+            echo "::notice::No keystore secret here (e.g. a fork): signing with a throwaway key."
+            PASSWORD=throwaway
+            keytool -genkeypair -keystore "$keystore" -alias resume -keyalg RSA -keysize 2048 \
+              -validity 1 -storepass "$PASSWORD" -keypass "$PASSWORD" -dname "CN=throwaway"
+          fi
+          echo "ANDROID_KEYSTORE=$keystore" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
+      - name: Build the APK
+        run: bash 3d-resume/android/build-apk.sh resume-3d-android.apk
+      - name: Report the APK size
+        run: |
+          echo "APK size: $(wc -c < resume-3d-android.apk) bytes" >> "$GITHUB_STEP_SUMMARY"
+      # Uploaded as-is (no zip wrapper); the artifact is named after the file.
+      - uses: actions/upload-artifact@v7
+        with:
+          path: resume-3d-android.apk
+          archive: false
+
+  ios:
+    name: iOS Simulator app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install toolchain from rust-toolchain.toml
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the Simulator app
+        run: bash 3d-resume/ios/build-simulator-app.sh resume-3d-ios-simulator.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          path: resume-3d-ios-simulator.zip
+          archive: false
+      - name: Launch in a simulator (smoke test)
+        if: inputs.smoke_test
+        run: |
+          device=$(xcrun simctl list devices available --json \
+            | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')
+          echo "Simulator: $(xcrun simctl list devices | grep "$device")"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          ditto -x -k resume-3d-ios-simulator.zip sim
+          xcrun simctl install "$device" "sim/3D Resume.app"
+          xcrun simctl launch "$device" io.github.haraldreingruber.resume
+          sleep 20
+          mkdir -p ios-screenshot
+          xcrun simctl io "$device" screenshot ios-screenshot/simulator.png
+          # Still running? (A crash would have ended it.)
+          xcrun simctl spawn "$device" launchctl list | grep -q io.github.haraldreingruber.resume
+      - name: Upload the simulator screenshot
+        if: ${{ !cancelled() && inputs.smoke_test }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-simulator-screenshot
+          path: ios-screenshot

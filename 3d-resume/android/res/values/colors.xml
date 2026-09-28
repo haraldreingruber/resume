@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The background's night blue, as in web/favicon.svg. -->
+    <color name="icon_background">#0B1A2B</color>
+</resources>

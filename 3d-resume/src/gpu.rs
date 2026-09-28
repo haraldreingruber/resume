@@ -18,7 +18,9 @@ pub struct Context {
 pub struct Gpu {
     instance: wgpu::Instance,
     window: Arc<Window>,
-    surface: wgpu::Surface<'static>,
+    /// `None` while the app is suspended (Android destroys the window's
+    /// surface then).
+    surface: Option<wgpu::Surface<'static>>,
     pub context: Context,
     pub config: wgpu::SurfaceConfiguration,
 }
@@ -65,7 +67,7 @@ impl Gpu {
         let gpu = Self {
             instance,
             window,
-            surface,
+            surface: Some(surface),
             context: Context {
                 device,
                 queue,
@@ -89,7 +91,30 @@ impl Gpu {
     }
 
     fn configure(&self) {
-        self.surface.configure(&self.context.device, &self.config);
+        if let Some(surface) = &self.surface {
+            surface.configure(&self.context.device, &self.config);
+        }
+    }
+
+    /// The app went to the background: drop the surface (Android destroys
+    /// the native window).
+    pub fn suspend(&mut self) {
+        self.surface = None;
+    }
+
+    /// Back in the foreground: a new surface for the (possibly new) native
+    /// window.
+    pub fn resume(&mut self) {
+        if self.surface.is_some() {
+            return;
+        }
+        match self.instance.create_surface(self.window.clone()) {
+            Ok(surface) => {
+                self.surface = Some(surface);
+                self.resize(self.window.inner_size());
+            }
+            Err(error) => log::error!("creating surface failed: {error}"),
+        }
     }
 
     /// Draws a frame with `draw` and presents it. Returns `false` if the
@@ -111,7 +136,7 @@ impl Gpu {
 
     /// The next frame to draw into, or `None` to skip this frame.
     fn acquire(&mut self) -> Option<wgpu::SurfaceTexture> {
-        match self.surface.get_current_texture() {
+        match self.surface.as_ref()?.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => Some(texture),
             wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Timeout => None,
             wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
@@ -126,7 +151,7 @@ impl Gpu {
             wgpu::CurrentSurfaceTexture::Lost => {
                 match self.instance.create_surface(self.window.clone()) {
                     Ok(surface) => {
-                        self.surface = surface;
+                        self.surface = Some(surface);
                         self.configure();
                     }
                     Err(error) => log::error!("recreating surface failed: {error}"),

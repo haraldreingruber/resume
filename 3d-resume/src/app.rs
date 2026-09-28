@@ -568,6 +568,12 @@ impl App {
 impl ApplicationHandler<AppEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
+            // Back from the background (phones): a new surface.
+            if let Some(state) = &mut self.state {
+                state.gpu.resume();
+            }
+            self.layout();
+            self.request_redraw();
             return;
         }
         let window = match event_loop.create_window(window_attributes(&self.title)) {
@@ -590,6 +596,13 @@ impl ApplicationHandler<AppEvent> for App {
         pollster::block_on(init);
         #[cfg(target_arch = "wasm32")]
         wasm_bindgen_futures::spawn_local(init);
+    }
+
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        // Android destroys the window's surface while in the background.
+        if let Some(state) = &mut self.state {
+            state.gpu.suspend();
+        }
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {

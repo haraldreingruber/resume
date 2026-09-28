@@ -39,6 +39,13 @@ jobs:
     with:
       screenshots: true
 
+  mobile:
+    name: Mobile
+    uses: ./.github/workflows/mobile.yml
+    with:
+      smoke_test: true
+    secrets: inherit
+
   latex:
     name: PDF
     runs-on: ubuntu-latest
