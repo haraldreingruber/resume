@@ -1,11 +1,11 @@
 //! Screen-space layer in physical pixels (origin bottom-left, y up), drawn on
 //! top of the scene with an orthographic projection and no fading. The native
-//! app uses it for the "Text version · PDF" buttons that the web page provides
-//! as HTML.
+//! app uses it for the "Skills · Text version · PDF" buttons that the web page
+//! provides as HTML.
 
 use glam::{Mat4, Vec3};
 
-use crate::scene::{Action, Scene};
+use crate::scene::{Action, Link, Scene};
 use crate::shapes::ShapeInstance;
 use crate::text::{self, Font, GlyphInstance, TextStyle, rgb};
 
@@ -18,15 +18,19 @@ const FOCUS: [f32; 4] = rgb(0x6DB3E8);
 /// A screen-space button: its label and hover group.
 pub type Button = (&'static str, u32);
 
-/// The native "Text version" / "PDF" buttons, registered as scene actions.
-/// None on the web, where the page has an HTML nav instead.
+/// The native "Skills" / "Text version" / "PDF" buttons, registered as
+/// scene actions. None on the web, where the page has an HTML nav instead.
 pub fn native_buttons(scene: &mut Scene) -> Vec<Button> {
     if cfg!(target_arch = "wasm32") {
         return Vec::new();
     }
     vec![
-        ("Text version", scene.add_action(Action::TextVersion)),
-        ("PDF", scene.add_action(Action::Pdf)),
+        ("Skills", scene.add_action(Action::ToggleSkills)),
+        (
+            "Text version",
+            scene.add_action(Action::Open(Link::TextVersion)),
+        ),
+        ("PDF", scene.add_action(Action::Open(Link::Pdf))),
     ]
 }
 

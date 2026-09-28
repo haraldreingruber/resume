@@ -2144,6 +2144,7 @@ dependencies = [
  "glam 0.33.10",
  "image",
  "log",
+ "naga",
  "nalgebra",
  "open",
  "png",

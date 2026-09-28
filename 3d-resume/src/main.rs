@@ -7,6 +7,7 @@ mod content;
 mod focus;
 mod gpu;
 mod intro;
+mod lines;
 mod links;
 mod particles;
 mod renderer;
@@ -14,6 +15,7 @@ mod scene;
 #[cfg(not(target_arch = "wasm32"))]
 mod screenshot;
 mod shapes;
+mod skillmap;
 mod text;
 mod timeline;
 mod ui;

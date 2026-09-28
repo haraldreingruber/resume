@@ -320,6 +320,13 @@
             }
           ]
         },
+        "x-short": {
+          "description": "Short name for tight spaces, e.g. the 3D skill map. Defaults to the\nkind of project (or the title).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "x-skills": {
           "description": "Skills used, as exact keywords from `skills[].keywords`.",
           "type": "array",
@@ -437,6 +444,13 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "x-short": {
+          "description": "Short name for tight spaces, e.g. the 3D skill map. Defaults to the\ncompany name.",
+          "type": [
+            "string",
+            "null"
           ]
         },
         "x-skills": {

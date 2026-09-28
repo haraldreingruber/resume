@@ -103,6 +103,10 @@ pub struct Work {
     pub position: String,
     /// Company name.
     pub name: String,
+    /// Short name for tight spaces, e.g. the 3D skill map. Defaults to the
+    /// company name.
+    #[serde(rename = "x-short")]
+    pub short: Option<String>,
     /// Id of an entry in `x-places`.
     #[serde(rename = "x-place")]
     pub place: Option<String>,
@@ -141,6 +145,10 @@ pub struct Project {
     pub entity: Option<String>,
     /// Project or thesis title.
     pub name: String,
+    /// Short name for tight spaces, e.g. the 3D skill map. Defaults to the
+    /// kind of project (or the title).
+    #[serde(rename = "x-short")]
+    pub short: Option<String>,
     /// What was achieved (inline Markdown).
     pub description: Option<String>,
     /// Id of an entry in `x-places`.

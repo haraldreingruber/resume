@@ -27,7 +27,7 @@ console_error_panic_hook = "0.1.7"
 console_log = "1.1.0"
 wasm-bindgen = "0.2.129"
 wasm-bindgen-futures = "0.4.79"
-web-sys = { version = "0.3.106", features = ["Window", "Document", "Element", "Event", "EventTarget", "History", "HtmlCanvasElement", "KeyboardEvent", "Location", "MediaQueryList", "Url", "UrlSearchParams"] }
+web-sys = { version = "0.3.106", features = ["Window", "Document", "Element", "Event", "EventTarget", "History", "HtmlCanvasElement", "HtmlElement", "KeyboardEvent", "Location", "MediaQueryList", "Url", "UrlSearchParams"] }
 wgpu = { version = "30.0.1", default-features = false, features = ["webgpu", "web"] }
 
 [build-dependencies]
@@ -38,3 +38,6 @@ nalgebra = "0.34.1"
 postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
 resume-model = { workspace = true, features = ["load"] }
 ttf-parser = "0.25.1"
+
+[dev-dependencies]
+naga = { version = "30.0.1", default-features = false, features = ["wgsl-in"] }

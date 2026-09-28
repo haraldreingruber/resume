@@ -81,6 +81,7 @@ impl Resume {
             id: _,
             position,
             organization,
+            short_name,
             location,
             dates: _,
             summary,
@@ -91,6 +92,7 @@ impl Resume {
         {
             text.push_str(position);
             text.push_str(organization);
+            text.extend(short_name.iter().map(String::as_str));
             text.extend(location.iter().map(String::as_str));
             text.extend(summary.iter().map(RichText::plain));
             text.extend(highlights.iter().map(RichText::plain));
@@ -102,6 +104,7 @@ impl Resume {
             kind,
             entity,
             title,
+            short_name,
             description,
             location,
             dates: _,
@@ -112,6 +115,7 @@ impl Resume {
             text.extend(kind.iter().map(String::as_str));
             text.extend(entity.iter().map(String::as_str));
             text.push_str(title);
+            text.extend(short_name.iter().map(String::as_str));
             text.extend(description.iter().map(RichText::plain));
             text.extend(location.iter().map(String::as_str));
             text.extend(skills.iter().map(String::as_str));
@@ -219,6 +223,8 @@ pub struct Work {
     pub id: String,
     pub position: String,
     pub organization: String,
+    /// `x-short`; see `Work::short_label`.
+    pub short_name: Option<String>,
     pub location: Option<String>,
     pub dates: DateRange,
     /// Condensed one-paragraph version of the highlights.
@@ -230,6 +236,14 @@ pub struct Work {
     pub accent: Option<[u8; 3]>,
 }
 
+impl Work {
+    /// A label for tight spaces (the 3D skill map): `x-short`, else the
+    /// organization.
+    pub fn short_label(&self) -> &str {
+        self.short_name.as_deref().unwrap_or(&self.organization)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
     pub id: String,
@@ -238,6 +252,8 @@ pub struct Project {
     /// Organization the project was done at.
     pub entity: Option<String>,
     pub title: String,
+    /// `x-short`; see `Project::short_label`.
+    pub short_name: Option<String>,
     pub description: Option<RichText>,
     pub location: Option<String>,
     pub dates: DateRange,
@@ -248,6 +264,15 @@ pub struct Project {
 }
 
 impl Project {
+    /// A label for tight spaces (the 3D skill map): `x-short`, else the kind
+    /// of project, else the title.
+    pub fn short_label(&self) -> &str {
+        self.short_name
+            .as_deref()
+            .or(self.kind.as_deref())
+            .unwrap_or(&self.title)
+    }
+
     /// "Master's Thesis – Austrian Institute of Technology"; falls back to the title.
     pub fn heading(&self) -> String {
         join_present(

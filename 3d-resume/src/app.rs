@@ -21,7 +21,7 @@ use crate::gpu::Gpu;
 use crate::intro::{self, Intro};
 use crate::particles;
 use crate::renderer::Renderer;
-use crate::scene::{Lens, Scene};
+use crate::scene::{Action, Lens, Scene};
 use crate::timeline::Timeline;
 use crate::ui::{self, Button, UiLayer};
 
@@ -37,7 +37,10 @@ const DOUBLE_PRESS_SLOP: f64 = 24.0;
 
 pub enum AppEvent {
     /// GPU initialization finished (asynchronous on the web).
-    GpuReady(Result<Gpu, String>),
+    GpuReady(Result<Box<Gpu>, String>),
+    /// The page's Skills link was clicked.
+    #[cfg(target_arch = "wasm32")]
+    ToggleSkills,
 }
 
 /// Start options from the URL (web) or command line (native).
@@ -67,6 +70,10 @@ pub struct App {
     focused: Option<u32>,
     /// The last click or tap on empty space (half of a double-click).
     empty_press: Option<Press>,
+    /// A skill pinned on the skill map (by a click or tap) until unpinned.
+    pinned: Option<u32>,
+    /// Where S / the Skills button flies back to from the skill map.
+    skills_return: Option<usize>,
     modifiers: ModifiersState,
     /// The station in view, and the one last shown in the address bar.
     station: usize,
@@ -93,6 +100,17 @@ fn ndc(position: PhysicalPosition<f64>, gpu: &Gpu) -> Vec2 {
         2.0 * position.x as f32 / width - 1.0,
         1.0 - 2.0 * position.y as f32 / height,
     )
+}
+
+/// Where S goes from `current`, and where it goes back to next time: to the
+/// skill map (remembering `current`), or from it back to where you came from
+/// (staying if you arrived another way, e.g. by scrolling or a deep link).
+fn skills_toggle(current: usize, skills: usize, back: Option<usize>) -> (usize, Option<usize>) {
+    if current == skills {
+        (back.unwrap_or(skills), None)
+    } else {
+        (skills, Some(current))
+    }
 }
 
 /// When and where a click or tap happened.
@@ -138,6 +156,8 @@ impl App {
             touch: None,
             focused: None,
             empty_press: None,
+            pinned: None,
+            skills_return: None,
             modifiers: ModifiersState::empty(),
             station: start,
             shown_station: start,
@@ -147,7 +167,10 @@ impl App {
             tab_leaves: Default::default(),
         };
         #[cfg(target_arch = "wasm32")]
-        crate::web::release_tab_at_edges(app.tab_leaves.clone());
+        {
+            crate::web::release_tab_at_edges(app.tab_leaves.clone());
+            crate::web::on_skills_link(app.proxy.clone());
+        }
         app.publish_tab_leaves();
         app
     }
@@ -208,6 +231,10 @@ impl App {
         let station = self.timeline.nearest();
         if station != self.station {
             self.station = station;
+            // A pinned skill only stays pinned while the map is in view.
+            if self.pinned.take().is_some() {
+                self.update_groups();
+            }
             if self.focused.is_some_and(|g| !self.targets().contains(&g)) {
                 self.set_focus(None);
             } else {
@@ -266,12 +293,16 @@ impl App {
         }
     }
 
-    /// Uploads the hovered and focused groups and redraws.
+    /// Uploads the hovered and focused groups and the skill map's relations
+    /// (of the hovered, else the focused, else the pinned node), and redraws.
     fn update_groups(&mut self) {
+        let relations = [self.hovered, self.focused, self.pinned]
+            .into_iter()
+            .find_map(|group| self.scene.relations(group));
         if let Some(state) = &mut self.state {
             state
                 .renderer
-                .set_groups(&state.gpu.context, self.hovered, self.focused);
+                .set_groups(&state.gpu.context, self.hovered, self.focused, relations);
         }
         self.request_redraw();
     }
@@ -342,15 +373,40 @@ impl App {
         }
     }
 
-    fn activate(&self, group: u32) {
-        if let Some(action) = self.scene.action(group) {
-            crate::links::open(action);
+    fn activate(&mut self, group: u32) {
+        match self.scene.action(group).cloned() {
+            Some(Action::Open(link)) => crate::links::open(&link),
+            Some(Action::GoToStation(station)) => {
+                self.timeline.go_to(station);
+                self.request_redraw();
+            }
+            Some(Action::Pin) => {
+                self.pinned = (self.pinned != Some(group)).then_some(group);
+                self.update_groups();
+            }
+            Some(Action::ToggleSkills) => self.toggle_skills(),
+            None => {}
         }
     }
 
-    /// A click or tap on empty space; the second of a quick pair toggles
-    /// fullscreen.
+    /// S, the Skills button or link: flies to the skill map, or back.
+    fn toggle_skills(&mut self) {
+        let (target, back) = skills_toggle(
+            self.timeline.nearest(),
+            self.scene.skills_station(),
+            self.skills_return,
+        );
+        self.skills_return = back;
+        self.timeline.go_to(target);
+        self.request_redraw();
+    }
+
+    /// A click or tap on empty space: unpins a skill; the second of a quick
+    /// pair toggles fullscreen.
     fn press_empty(&mut self, position: PhysicalPosition<f64>) {
+        if self.pinned.take().is_some() {
+            self.update_groups();
+        }
         let press = (Instant::now(), position);
         if self
             .empty_press
@@ -411,13 +467,17 @@ impl App {
             #[cfg(not(target_arch = "wasm32"))]
             Key::Named(NamedKey::F11) => return self.toggle_fullscreen(),
             Key::Character(c)
-                if c.eq_ignore_ascii_case("f")
-                    && !event.repeat
+                if !event.repeat
                     && !(self.modifiers.control_key()
                         || self.modifiers.alt_key()
                         || self.modifiers.super_key()) =>
             {
-                return self.toggle_fullscreen();
+                if c.eq_ignore_ascii_case("f") {
+                    self.toggle_fullscreen();
+                } else if c.eq_ignore_ascii_case("s") {
+                    self.toggle_skills();
+                }
+                return;
             }
             Key::Named(
                 NamedKey::ArrowDown | NamedKey::ArrowRight | NamedKey::PageDown | NamedKey::Space,
@@ -483,7 +543,7 @@ impl ApplicationHandler<AppEvent> for App {
         let display = event_loop.owned_display_handle();
         let proxy = self.proxy.clone();
         let init = async move {
-            let gpu = Gpu::new(display, window).await;
+            let gpu = Gpu::new(display, window).await.map(Box::new);
             let _ = proxy.send_event(AppEvent::GpuReady(gpu));
         };
         #[cfg(not(target_arch = "wasm32"))]
@@ -499,13 +559,15 @@ impl ApplicationHandler<AppEvent> for App {
                 self.state = Some(State {
                     lens: Scene::lens(gpu.aspect()),
                     ui: UiLayer::default(),
-                    gpu,
+                    gpu: *gpu,
                     renderer,
                 });
                 self.layout();
                 self.last_frame = Instant::now();
                 self.request_redraw();
             }
+            #[cfg(target_arch = "wasm32")]
+            AppEvent::ToggleSkills => self.toggle_skills(),
             AppEvent::GpuReady(Err(error)) => {
                 log::error!("WebGPU initialization failed: {error}");
                 #[cfg(target_arch = "wasm32")]
@@ -595,6 +657,15 @@ fn window_attributes(title: &str) -> winit::window::WindowAttributes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn s_flies_to_the_skill_map_and_back() {
+        let skills = 12;
+        assert_eq!(skills_toggle(3, skills, None), (skills, Some(3)));
+        assert_eq!(skills_toggle(skills, skills, Some(3)), (3, None));
+        // Arrived by scrolling: stays.
+        assert_eq!(skills_toggle(skills, skills, None), (skills, None));
+    }
 
     #[test]
     fn double_press_needs_two_quick_nearby_presses() {

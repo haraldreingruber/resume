@@ -42,12 +42,13 @@ pub struct Request {
     pub focus: Option<usize>,
 }
 
-/// One image: where on the timeline, and until when the particles run
-/// (`None`: until they come to rest).
+/// One image: where on the timeline, until when the particles run (`None`:
+/// until they come to rest), and which focus target has keyboard focus.
 struct Frame {
     name: String,
     position: f32,
     until: Option<f32>,
+    focus: Option<usize>,
 }
 
 /// The images to take, in simulation order.
@@ -56,12 +57,14 @@ fn frames(scene: &Scene, request: &Request) -> Result<Vec<Frame>, String> {
         name: format!("{i:02}-{}", scene.station_id(i).unwrap_or("station")),
         position: i as f32,
         until: request.time,
+        focus: request.focus,
     };
     if let Some(position) = request.position {
         return Ok(vec![Frame {
             name: format!("position-{position}"),
             position,
             until: request.time,
+            focus: request.focus,
         }]);
     }
     if let Some(key) = &request.station {
@@ -78,15 +81,31 @@ fn frames(scene: &Scene, request: &Request) -> Result<Vec<Frame>, String> {
             name: "00-intro-assembling".to_owned(),
             position: 0.0,
             until: Some(ASSEMBLING_AT),
+            focus: None,
         },
         station(0),
         Frame {
             name: "00-intro-scattering".to_owned(),
             position: SCATTERING_AT,
             until: None,
+            focus: None,
         },
     ];
     frames.extend((1..scene.station_count()).map(station));
+    // The skill map with its first entry focused: connections highlighted.
+    let skills = scene.skills_station();
+    let at = frames
+        .iter()
+        .position(|f| f.position == skills as f32)
+        .map_or(frames.len(), |i| i + 1);
+    frames.insert(
+        at,
+        Frame {
+            name: format!("{skills:02}-skills-related"),
+            focus: Some(0),
+            ..station(skills)
+        },
+    );
     Ok(frames)
 }
 
@@ -143,8 +162,8 @@ pub fn run(request: &Request) -> Result<(), String> {
         simulate(&mut renderer, &ctx, &mut intro, frame.position, frame.until);
         let station = frame.position.round() as usize;
         let targets = focus::targets(&scene, station, &buttons);
-        let focused = request.focus.and_then(|n| targets.get(n).copied());
-        renderer.set_groups(&ctx, None, focused);
+        let focused = frame.focus.and_then(|n| targets.get(n).copied());
+        renderer.set_groups(&ctx, None, focused, scene.relations(focused));
         let camera = scene.camera(frame.position, &lens);
         renderer.draw(&ctx, &view, &camera, projection);
         let rgba = read_back(&ctx, &target)?;
