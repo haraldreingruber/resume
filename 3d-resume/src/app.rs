@@ -61,8 +61,10 @@ pub struct App {
     window: Option<Arc<Window>>,
     state: Option<State>,
     last_frame: Instant,
-    /// Frames presented so far (the first one is logged).
+    /// Frames presented so far, and when the app started (frame counts at
+    /// powers of two are logged, to see how fast a device draws).
     presented: u64,
+    started: Instant,
     cursor: Option<PhysicalPosition<f64>>,
     /// Hover group under the cursor, and the one a mouse press started on.
     hovered: Option<u32>,
@@ -154,6 +156,7 @@ impl App {
             state: None,
             last_frame: Instant::now(),
             presented: 0,
+            started: Instant::now(),
             cursor: None,
             hovered: None,
             pressed: None,
@@ -217,8 +220,9 @@ impl App {
         let presented = gpu.render(|ctx, view| renderer.draw(ctx, view, &camera, projection));
         if presented {
             self.presented += 1;
-            if self.presented == 1 {
-                log::info!("first frame presented");
+            if self.presented.is_power_of_two() {
+                let (frames, seconds) = (self.presented, self.started.elapsed().as_secs_f32());
+                log::info!("{frames} frames presented after {seconds:.1} s");
             }
         }
         // Keep redrawing while the timeline or the particles move, and retry
