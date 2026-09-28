@@ -3,6 +3,7 @@
 \geometry{left=1.25cm,right=1.25cm,top=1.5cm,bottom=1.5cm,columnsep=1.2cm}
 
 \usepackage{paracol}
+\usepackage{needspace}
 
 % This example is compiled with pdflatex, so use the CTAN roboto/lato
 % packages (already installed alongside this template) rather than fontspec.
@@ -39,6 +40,10 @@
 % Between contact details (email, location) and online profiles.
 \newcommand{\ResumeInfoBreak}{\newline}
 \newcommand{\ResumeEntry}[5]{\cvevent{#1}{#2}{#3}{#4}#5}
+% For the short entries in the sidebar: heading, dates and text stay
+% together; with less room left in the column, the entry starts on the
+% next page.
+\newcommand{\ResumeEntryTogether}[5]{\needspace{6\baselineskip}\cvevent{#1}{#2}{#3}{#4}#5}
 \newcommand{\ResumeEntrySep}{\divider}
 \newcommand{\ResumeHighlights}[1]{\begin{itemize}#1\end{itemize}}
 \newcommand{\ResumeTag}[1]{\cvtag{#1}}
@@ -95,7 +100,7 @@
 
 \cvsection{Education}
 
-\ResumeEducation
+{\let\ResumeEntry\ResumeEntryTogether\ResumeEducation}
 
 \cvsection{Languages}
 \ResumeLanguages

@@ -56,7 +56,7 @@ x-places:
 
 work:
   - x-id: dedalus
-    x-skills: [Rust, TypeScript/JavaScript, C++, WebGL/OpenGL, WebAssembly/Emscripten, Web Components, Playwright, Storybook]
+    x-skills: [Rust, TypeScript/JavaScript, C++, WebGL/OpenGL, WebAssembly/Emscripten, Web Components, Playwright, Storybook, Unit Testing, E2E Testing, Scrum, "AI-Driven Development (Copilot, Claude Code, OpenSpec)"]
     position: Medical 3D Visualization Expert
     name: Dedalus HealthCare DACH
     x-short: Dedalus HealthCare
@@ -87,7 +87,7 @@ work:
         Playwright, replacing cumbersome end-to-end tests in host applications
 
   - x-id: mob-tour
-    x-skills: [Unit Testing & TDD, Continuous Improvement, Clean Code]
+    x-skills: [TDD, Unit Testing, Pair-/Mob-Programming, Clean Code]
     position: Pair & Mob-Programming Tour (Apprenticeship)
     name: Self-employed
     x-short: Mob-Programming Tour
@@ -106,7 +106,7 @@ work:
       - Co-organized the Mob-Programming on Open Source Software meetup in Austria
 
   - x-id: three10
-    x-skills: [Unity 3D, C#, TypeScript/JavaScript, Node.js, Docker]
+    x-skills: [Unity 3D, C#, TypeScript/JavaScript, Node.js, Docker, Kanban]
     position: Software Engineer -- Unity 3D/Node.js/React/TypeScript
     name: three10
     x-place: vienna
@@ -133,7 +133,7 @@ work:
         implemented network screen capture/streaming
 
   - x-id: viewar
-    x-skills: [C++, WebAssembly/Emscripten, WebGL/OpenGL]
+    x-skills: [C++, WebAssembly/Emscripten, WebGL/OpenGL, Scrum]
     position: Software Engineer, Augmented Reality (C++/Objective-C/JavaScript)
     name: ViewAR
     x-place: vienna
@@ -156,7 +156,7 @@ work:
       - Added video texture decoding support
 
   - x-id: agfa-volume-rendering
-    x-skills: [C++, SIMD (SSE/AVX/Neon), WebGL/OpenGL, Image Processing]
+    x-skills: [C++, SIMD (SSE/AVX/Neon), WebGL/OpenGL, Image Processing, Unit Testing, E2E Testing, Scrum]
     position: 3D Volume Rendering Engineer (C++)
     name: Agfa HealthCare
     x-short: Agfa · Volume Rendering
@@ -177,7 +177,7 @@ work:
       - Built a CMake build system, replacing separate per-platform build scripts
 
   - x-id: agfa-3d-visualization
-    x-skills: [Java, Image Processing]
+    x-skills: [Java, Image Processing, Unit Testing, E2E Testing, Scrum]
     position: Software Engineer, 3D Visualization (Java)
     name: Agfa HealthCare
     x-short: Agfa · 3D Visualization
@@ -237,10 +237,13 @@ skills:
   - x-id: practices
     name: Engineering Practices
     keywords:
-      - Unit Testing & TDD
-      - Agile (Scrum/Kanban)
-      - Continuous Improvement
+      - Unit Testing
+      - TDD
+      - E2E Testing
+      - Pair-/Mob-Programming
       - Clean Code
+      - Scrum
+      - Kanban
       - AI-Driven Development (Copilot, Claude Code, OpenSpec)
 
 education:
