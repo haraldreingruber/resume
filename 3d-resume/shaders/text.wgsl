@@ -11,7 +11,8 @@ struct Globals {
 
 struct Groups {
     // Per group (group 0 is never highlighted): x = highlight (0..1),
-    // y = keyboard focus (used by focus rings in shapes.wgsl).
+    // y = keyboard focus (used by focus rings in shapes.wgsl), z = fade-out
+    // (1 = hidden; the intro title while the particles form it).
     state: array<vec4<f32>, 64>,
 }
 
@@ -45,8 +46,11 @@ fn vs_main(@builtin(vertex_index) index: u32, glyph: Glyph) -> VertexOutput {
     var out: VertexOutput;
     out.clip = globals.view_proj * vec4<f32>(world, 1.0);
     out.uv = vec2<f32>(mix(glyph.uv.x, glyph.uv.z, corner.x), mix(glyph.uv.w, glyph.uv.y, corner.y));
-    let highlight = groups.state[min(glyph.group, 63u)].x;
-    out.color = vec4<f32>(mix(glyph.color.rgb, vec3<f32>(1.0), highlight * 0.35), glyph.color.a);
+    let state = groups.state[min(glyph.group, 63u)];
+    out.color = vec4<f32>(
+        mix(glyph.color.rgb, vec3<f32>(1.0), state.x * 0.35),
+        glyph.color.a * (1.0 - state.z),
+    );
     out.world = world;
     return out;
 }

@@ -6,7 +6,9 @@ mod app;
 mod content;
 mod focus;
 mod gpu;
+mod intro;
 mod links;
+mod particles;
 mod renderer;
 mod scene;
 #[cfg(not(target_arch = "wasm32"))]
@@ -76,8 +78,9 @@ fn options() -> app::Options {
     }
 }
 
-/// `--screenshots <dir> [--station <id|index>] [--size 1280x800] [--focus <n>]`:
-/// renders the stations (or one) headlessly to PNG files and exits.
+/// `--screenshots <dir> [--station <id|index> | --position <t>] [--time <s>]
+/// [--size 1280x800] [--focus <n>]`: renders the stations and two frames of
+/// the particle intro (or one frame) headlessly to PNG files and exits.
 #[cfg(not(target_arch = "wasm32"))]
 fn screenshots(dir: String) -> Result<(), String> {
     let size = match arg("--size") {
@@ -85,18 +88,25 @@ fn screenshots(dir: String) -> Result<(), String> {
             .ok_or_else(|| format!("--size `{size}`: expected WIDTHxHEIGHT, e.g. 1280x800"))?,
         None => screenshot::DEFAULT_SIZE,
     };
-    let focus = arg("--focus")
-        .map(|n| {
-            n.parse()
-                .map_err(|_| format!("--focus `{n}`: expected a number"))
-        })
-        .transpose()?;
     screenshot::run(&screenshot::Request {
         dir: dir.into(),
         station: arg("--station"),
+        position: number("--position")?,
+        time: number("--time")?,
         size,
-        focus,
+        focus: number("--focus")?,
     })
+}
+
+/// The number after `name` on the command line, if given.
+#[cfg(not(target_arch = "wasm32"))]
+fn number<T: std::str::FromStr>(name: &str) -> Result<Option<T>, String> {
+    arg(name)
+        .map(|n| {
+            n.parse()
+                .map_err(|_| format!("{name} `{n}`: expected a number"))
+        })
+        .transpose()
 }
 
 /// The value after `name` on the command line, e.g. `dedalus` in

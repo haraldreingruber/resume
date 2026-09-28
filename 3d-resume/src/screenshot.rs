@@ -2,12 +2,15 @@
 //! to PNG files, without a window or event loop, so it also runs on machines
 //! without a display, e.g. CI with Mesa's software Vulkan driver
 //! (`WGPU_ADAPTER_NAME=llvmpipe`). Each image shows a station at rest, as the
-//! app shows it, including the native buttons.
+//! app shows it, including the native buttons, plus two frames of the
+//! particle intro. The particles run in fixed frame steps, so the images are
+//! deterministic.
 
 use std::path::{Path, PathBuf};
 
 use crate::focus;
 use crate::gpu::Context;
+use crate::intro::{self, Intro};
 use crate::renderer::Renderer;
 use crate::scene::Scene;
 use crate::ui::{self, UiLayer};
@@ -18,33 +21,104 @@ pub const DEFAULT_SIZE: [u32; 2] = [1280, 800];
 /// An image counts as rendered if at least this fraction of its pixels is
 /// bright (text); catches frames that come out blank.
 const MIN_BRIGHT: f64 = 0.001;
+/// Simulated frame length (seconds) for the particles.
+const FRAME: f32 = 1.0 / 60.0;
+/// When the default set shows the particles forming the name.
+const ASSEMBLING_AT: f32 = 1.5;
+/// Where the default set shows them scattering.
+const SCATTERING_AT: f32 = 0.3;
 
 pub struct Request {
     pub dir: PathBuf,
     /// One station (id or index) instead of all of them.
     pub station: Option<String>,
+    /// One timeline position instead, e.g. 0.3 (between intro and station 1).
+    pub position: Option<f32>,
+    /// Stops the particle assembly at this time (seconds) instead of letting
+    /// the particles come to rest; implies the intro if nothing else is set.
+    pub time: Option<f32>,
     pub size: [u32; 2],
     /// Gives keyboard focus to the n-th focus target (shows its focus ring).
     pub focus: Option<usize>,
 }
 
-/// Writes `NN-<id>.png` per station into `request.dir`.
+/// One image: where on the timeline, and until when the particles run
+/// (`None`: until they come to rest).
+struct Frame {
+    name: String,
+    position: f32,
+    until: Option<f32>,
+}
+
+/// The images to take, in simulation order.
+fn frames(scene: &Scene, request: &Request) -> Result<Vec<Frame>, String> {
+    let station = |i: usize| Frame {
+        name: format!("{i:02}-{}", scene.station_id(i).unwrap_or("station")),
+        position: i as f32,
+        until: request.time,
+    };
+    if let Some(position) = request.position {
+        return Ok(vec![Frame {
+            name: format!("position-{position}"),
+            position,
+            until: request.time,
+        }]);
+    }
+    if let Some(key) = &request.station {
+        let index = scene
+            .station_index(key)
+            .ok_or_else(|| format!("unknown station `{key}`"))?;
+        return Ok(vec![station(index)]);
+    }
+    if request.time.is_some() {
+        return Ok(vec![station(0)]);
+    }
+    let mut frames = vec![
+        Frame {
+            name: "00-intro-assembling".to_owned(),
+            position: 0.0,
+            until: Some(ASSEMBLING_AT),
+        },
+        station(0),
+        Frame {
+            name: "00-intro-scattering".to_owned(),
+            position: SCATTERING_AT,
+            until: None,
+        },
+    ];
+    frames.extend((1..scene.station_count()).map(station));
+    Ok(frames)
+}
+
+/// Runs the particles in fixed frame steps until `until` or until they rest.
+fn simulate(
+    renderer: &mut Renderer,
+    ctx: &Context,
+    intro: &mut Intro,
+    position: f32,
+    until: Option<f32>,
+) {
+    let scatter = intro::scatter(position);
+    while until.is_none_or(|t| intro.time() < t) {
+        match intro.advance(FRAME, scatter, None) {
+            Some(step) => renderer.step_particles(ctx, &step),
+            None => break,
+        }
+    }
+    renderer.set_title_opacity(ctx, intro.title_opacity());
+}
+
+/// Writes one PNG per frame into `request.dir`.
 pub fn run(request: &Request) -> Result<(), String> {
     let resume = crate::content::resume();
     let mut scene = Scene::new(&resume);
     let buttons = ui::native_buttons(&mut scene);
-    let stations: Vec<usize> = match &request.station {
-        Some(key) => vec![
-            scene
-                .station_index(key)
-                .ok_or_else(|| format!("unknown station `{key}`"))?,
-        ],
-        None => (0..scene.station_count()).collect(),
-    };
+    let frames = frames(&scene, request)?;
 
     let ctx = pollster::block_on(context())?;
     let [width, height] = request.size;
-    let mut renderer = Renderer::new(&ctx, &scene);
+    let mut renderer = Renderer::new(&ctx, &scene, true);
+    let mut intro = Intro::new(false);
     renderer.set_ui(&ctx, &UiLayer::buttons(width as f32, 1.0, &buttons));
     let lens = Scene::lens(width as f32 / height as f32);
     let projection = UiLayer::projection(width as f32, height as f32);
@@ -65,15 +139,16 @@ pub fn run(request: &Request) -> Result<(), String> {
     let view = target.create_view(&Default::default());
     std::fs::create_dir_all(&request.dir).map_err(|e| format!("{}: {e}", request.dir.display()))?;
 
-    for station in stations {
+    for frame in frames {
+        simulate(&mut renderer, &ctx, &mut intro, frame.position, frame.until);
+        let station = frame.position.round() as usize;
         let targets = focus::targets(&scene, station, &buttons);
         let focused = request.focus.and_then(|n| targets.get(n).copied());
         renderer.set_groups(&ctx, None, focused);
-        let camera = scene.camera(station as f32, &lens);
+        let camera = scene.camera(frame.position, &lens);
         renderer.draw(&ctx, &view, &camera, projection);
         let rgba = read_back(&ctx, &target)?;
-        let id = scene.station_id(station).unwrap_or("station");
-        let path = request.dir.join(format!("{station:02}-{id}.png"));
+        let path = request.dir.join(format!("{}.png", frame.name));
         // Written even if blank, so the failure can be inspected.
         write_png(&path, request.size, &rgba)?;
         check_rendered(&rgba).map_err(|e| format!("{}: {e}", path.display()))?;

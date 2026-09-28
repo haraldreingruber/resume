@@ -20,6 +20,20 @@ pub use baked::{ATLAS_SIZE, DISTANCE_RANGE_PX};
 
 pub const ATLAS_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/atlas.png"));
 
+/// The baked MSDF atlas as RGBA8 pixels (distance data, top row first).
+pub fn atlas_rgba() -> Vec<u8> {
+    let decoder = png::Decoder::new(std::io::Cursor::new(ATLAS_PNG));
+    let mut reader = decoder.read_info().expect("baked atlas is a valid PNG");
+    let mut pixels = vec![0; reader.output_buffer_size().expect("atlas size")];
+    let info = reader.next_frame(&mut pixels).expect("decode atlas");
+    let [width, height] = ATLAS_SIZE;
+    assert_eq!(
+        (info.width, info.height, info.color_type),
+        (width, height, png::ColorType::Rgba)
+    );
+    pixels
+}
+
 /// Index into `build.rs`'s font list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Font {
