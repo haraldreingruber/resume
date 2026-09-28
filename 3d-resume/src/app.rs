@@ -617,6 +617,10 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::GpuReady(Ok(gpu)) => {
+                if !gpu.context.compute {
+                    // No particles: the crisp title from the start.
+                    self.intro = None;
+                }
                 self.fit_layout(gpu.aspect());
                 let renderer = Renderer::new(&gpu.context, &self.scene, self.intro.is_some());
                 self.state = Some(State {

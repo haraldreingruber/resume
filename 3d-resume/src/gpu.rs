@@ -13,6 +13,44 @@ pub struct Context {
     pub queue: wgpu::Queue,
     /// sRGB format of the render target: shaders output linear colors.
     pub view_format: wgpu::TextureFormat,
+    /// Whether compute shaders run here (the intro particles need them;
+    /// OpenGL ES 3.0 phones lack them).
+    pub compute: bool,
+}
+
+impl Context {
+    /// Opens a device on `adapter`. It asks for WebGPU's default limits,
+    /// lowered wherever the adapter offers less (the iOS Simulator, say,
+    /// has 15 inter-stage variables, not 16): the app needs far less than
+    /// either.
+    pub async fn new(
+        adapter: &wgpu::Adapter,
+        label: &str,
+        view_format: wgpu::TextureFormat,
+    ) -> Result<Self, String> {
+        log::info!("GPU adapter: {:?}", adapter.get_info());
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some(label),
+                required_limits: wgpu::Limits::default().or_worse_values_from(&adapter.limits()),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        let compute = adapter
+            .get_downlevel_capabilities()
+            .flags
+            .contains(wgpu::DownlevelFlags::COMPUTE_SHADERS);
+        if !compute {
+            log::info!("no compute shaders: the intro shows the title without particles");
+        }
+        Ok(Self {
+            device,
+            queue,
+            view_format,
+            compute,
+        })
+    }
 }
 
 pub struct Gpu {
@@ -42,18 +80,10 @@ impl Gpu {
             })
             .await
             .map_err(|e| e.to_string())?;
-        log::info!("GPU adapter: {:?}", adapter.get_info());
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("resume"),
-                ..Default::default()
-            })
-            .await
-            .map_err(|e| e.to_string())?;
-
         let capabilities = surface.get_capabilities(&adapter);
         let format = capabilities.formats[0];
         let view_format = format.add_srgb_suffix();
+        let context = Context::new(&adapter, "resume", view_format).await?;
         let size = window.inner_size();
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -70,11 +100,7 @@ impl Gpu {
             instance,
             window,
             surface: Some(surface),
-            context: Context {
-                device,
-                queue,
-                view_format,
-            },
+            context,
             config,
             skipped: 0,
         };
