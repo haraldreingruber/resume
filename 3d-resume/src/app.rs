@@ -71,6 +71,9 @@ pub struct App {
     window: Option<Arc<Window>>,
     state: Option<State>,
     last_frame: Instant,
+    /// Another frame is due once this event-loop iteration is over (see
+    /// `about_to_wait`).
+    redraw_after: bool,
     /// Frames presented so far, and when the app started (frame counts at
     /// powers of two are logged, to see how fast a device draws).
     presented: u64,
@@ -169,6 +172,7 @@ impl App {
             window: None,
             state: None,
             last_frame: Instant::now(),
+            redraw_after: false,
             presented: 0,
             started: Instant::now(),
             cursor: None,
@@ -242,9 +246,7 @@ impl App {
         // Keep redrawing while the timeline or the particles move, and retry
         // a frame the surface skipped (e.g. right after the first
         // `configure()`) so a skipped frame is never the last one drawn.
-        if moving || intro_active || !presented {
-            self.request_redraw();
-        }
+        self.redraw_after = moving || intro_active || !presented;
         self.follow_station(!moving);
         if moving {
             // The link under a resting cursor changes as the camera moves.
@@ -701,6 +703,16 @@ impl ApplicationHandler<AppEvent> for App {
         pollster::block_on(init);
         #[cfg(target_arch = "wasm32")]
         wasm_bindgen_futures::spawn_local(init);
+    }
+
+    /// Requests the next frame of an animation. Not from within the frame
+    /// itself: on iOS, winit redraws via `setNeedsDisplay`, which UIKit
+    /// ignores while it's drawing, so the animation would stop after one
+    /// frame.
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if std::mem::take(&mut self.redraw_after) {
+            self.request_redraw();
+        }
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {

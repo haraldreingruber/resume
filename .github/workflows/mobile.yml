@@ -102,6 +102,13 @@ jobs:
           echo "--- app log"; cat ios-screenshot/stderr.txt ios-screenshot/stdout.txt || true
           # Still running? (A crash would have ended it.)
           xcrun simctl spawn "$device" launchctl list | grep -q io.github.haraldreingruber.resume
+          # Still drawing after the first frame? The intro takes dozens of
+          # frames even on a slow simulator (the app logs counts at powers
+          # of two).
+          if ! grep -q "32 frames presented" ios-screenshot/stderr.txt; then
+            echo "::error::The app stopped drawing after its first frames."
+            exit 1
+          fi
           # A blank (black) frame compresses to well under 150 KB; a rendered
           # station is several hundred.
           size=$(wc -c < ios-screenshot/simulator.png)
