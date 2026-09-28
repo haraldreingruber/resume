@@ -71,11 +71,13 @@ pub struct Particles {
 impl Particles {
     /// `scene_layout`: the bind group layout of the world layer (group 0 of
     /// the draw pipeline). `None` without title glyphs.
+    /// `format`: the scene's target format.
     pub fn new(
         ctx: &Context,
         scene_layout: &wgpu::BindGroupLayout,
         title: &Title,
         atlas: &[u8],
+        format: wgpu::TextureFormat,
     ) -> Option<Self> {
         let mut rng = Rng(SEED);
         let goals = sample_title(&title.glyphs, atlas, COUNT, RADIUS, &mut rng);
@@ -209,7 +211,7 @@ impl Particles {
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: ctx.view_format,
+                    format,
                     blend: Some(additive),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],

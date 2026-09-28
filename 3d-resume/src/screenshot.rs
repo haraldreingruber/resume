@@ -190,7 +190,7 @@ pub fn run(request: &Request) -> Result<(), String> {
         if request.stats {
             // A frame to measure first, so the overlay has numbers.
             let start = web_time::Instant::now();
-            renderer.draw(&ctx, &view, &camera, projection);
+            renderer.draw(&ctx, &view, request.size, &camera, projection);
             let cpu = start.elapsed();
             // Waits for the GPU, so its timestamps are ready.
             read_back(&ctx, &target)?;
@@ -237,7 +237,7 @@ pub fn run(request: &Request) -> Result<(), String> {
         let targets = focus::targets(&scene, station, panel_links, &buttons);
         let focused = frame.focus.and_then(|n| targets.get(n).copied());
         renderer.set_groups(&ctx, None, focused, scene.relations(focused));
-        renderer.draw(&ctx, &view, &camera, projection);
+        renderer.draw(&ctx, &view, request.size, &camera, projection);
         let rgba = read_back(&ctx, &target)?;
         let path = request.dir.join(format!("{}.png", frame.name));
         // Written even if blank, so the failure can be inspected.

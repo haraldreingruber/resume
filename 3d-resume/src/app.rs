@@ -266,14 +266,15 @@ impl App {
         }
         renderer.set_title_opacity(&gpu.context, title_opacity);
         let camera = self.scene.camera(position, lens);
-        let projection = UiLayer::projection(gpu.config.width as f32, gpu.config.height as f32);
+        let size = [gpu.config.width, gpu.config.height];
+        let projection = UiLayer::projection(size[0] as f32, size[1] as f32);
         // CPU time: updating and encoding, not waiting for the surface.
         let prepared = now.elapsed();
         let mut encoded = Duration::ZERO;
         let rendering = Instant::now();
         let presented = gpu.render(|ctx, view| {
             let start = Instant::now();
-            renderer.draw(ctx, view, &camera, projection);
+            renderer.draw(ctx, view, size, &camera, projection);
             encoded = start.elapsed();
         });
         // The rest of it: getting the surface texture and presenting it.
