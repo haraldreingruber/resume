@@ -87,7 +87,7 @@ work:
         Playwright, replacing cumbersome end-to-end tests in host applications
 
   - x-id: mob-tour
-    x-skills: [TDD, Unit Testing, Pair-/Mob-Programming, Clean Code]
+    x-skills: [Test-driven Development (TDD), Unit Testing, Pair-/Mob-Programming, Clean Code]
     position: Pair & Mob-Programming Tour (Apprenticeship)
     name: Self-employed
     x-short: Mob-Programming Tour
@@ -238,8 +238,8 @@ skills:
     name: Engineering Practices
     keywords:
       - Unit Testing
-      - TDD
       - E2E Testing
+      - Test-driven Development (TDD)
       - Pair-/Mob-Programming
       - Clean Code
       - Scrum
