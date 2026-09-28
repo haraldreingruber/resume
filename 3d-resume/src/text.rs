@@ -183,29 +183,34 @@ fn chars_width(chars: &[StyledChar], size: f32) -> f32 {
     chars.iter().map(|c| advance(c.font, c.ch)).sum::<f32>() * size
 }
 
-/// Greedy word wrap at spaces; returns line ranges (the breaking space is
-/// dropped).
+/// Greedy word wrap; returns line ranges. Lines break at spaces (the space
+/// is dropped) or after a slash (kept, so "3D/Node.js/React" can wrap on a
+/// narrow screen).
 fn wrap(chars: &[StyledChar], size: f32, max_width: Option<f32>) -> Vec<Range<usize>> {
     let max_width = max_width.unwrap_or(f32::INFINITY);
     let mut lines = Vec::new();
     let mut start = 0;
-    let mut last_break = None;
+    // Where the line could end, and where the next one would start.
+    let mut last_break: Option<(usize, usize)> = None;
     for (i, c) in chars.iter().enumerate() {
-        if c.ch == ' ' {
-            if chars_width(&chars[start..i], size) > max_width
-                && let Some(b) = last_break
-            {
-                lines.push(start..b);
-                start = b + 1;
-            }
-            last_break = Some(i);
+        let opportunity = match c.ch {
+            ' ' => (i, i + 1),
+            '/' => (i + 1, i + 1),
+            _ => continue,
+        };
+        if chars_width(&chars[start..opportunity.0], size) > max_width
+            && let Some((end, next)) = last_break
+        {
+            lines.push(start..end);
+            start = next;
         }
+        last_break = Some(opportunity);
     }
     if chars_width(&chars[start..], size) > max_width
-        && let Some(b) = last_break.filter(|&b| b > start)
+        && let Some((end, next)) = last_break.filter(|&(end, _)| end > start)
     {
-        lines.push(start..b);
-        start = b + 1;
+        lines.push(start..end);
+        start = next;
     }
     lines.push(start..chars.len());
     lines
@@ -411,6 +416,17 @@ mod tests {
         layout("end", style.right_aligned(), Vec3::ZERO, &mut glyphs);
         assert!(glyphs.iter().all(|g| g.rect[2] <= 0.01));
         assert!(glyphs.iter().any(|g| g.rect[2] > -0.01));
+    }
+
+    #[test]
+    fn wraps_after_slashes_too() {
+        let chars = styled("Engineer 3D/Node.js/React/TypeScript");
+        let narrow = width(Font::Regular, 1.0, "Engineer 3D/Node.js/");
+        let lines: Vec<String> = wrap(&chars, 1.0, Some(narrow))
+            .into_iter()
+            .map(|range| chars[range].iter().map(|c| c.ch).collect())
+            .collect();
+        assert_eq!(lines, ["Engineer 3D/Node.js/", "React/TypeScript"]);
     }
 
     #[test]

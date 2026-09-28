@@ -75,12 +75,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Rounded-box signed distance (negative inside).
     let radius = in.style.x;
     let q = abs(in.local) - in.half_size + radius;
-    var d = length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - radius;
-    if in.style.y > 0.0 {
-        d = abs(d + in.style.y * 0.5) - in.style.y * 0.5;
-    }
+    let d = length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+    // One pixel in the distance's units.
     let aa = max(fwidth(d), 1e-5);
-    let coverage = clamp(0.5 - d / aa, 0.0, 1.0);
+    var coverage = clamp(0.5 - d / aa, 0.0, 1.0);
+    if in.style.y > 0.0 {
+        // An outline is the outer edge minus an edge `border` further in,
+        // both smooth. A border thinner than a pixel (e.g. a chip far from
+        // the camera) is drawn a pixel wide and correspondingly fainter,
+        // instead of breaking up into jagged fragments.
+        let width = max(in.style.y, aa);
+        let inner = clamp(0.5 - (d + width) / aa, 0.0, 1.0);
+        coverage = (coverage - inner) * (in.style.y / width);
+    }
 
     var fade = 1.0;
     if globals.params.y > 0.5 {

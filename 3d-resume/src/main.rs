@@ -81,7 +81,7 @@ fn options() -> app::Options {
 }
 
 /// `--screenshots <dir> [--station <id|index> | --position <t>] [--time <s>]
-/// [--size 1280x800] [--focus <n>]`: renders the stations and two frames of
+/// [--size 1280x800] [--scale <n>] [--focus <n>]`: renders the stations and two frames of
 /// the particle intro (or one frame) headlessly to PNG files and exits.
 #[cfg(not(target_arch = "wasm32"))]
 fn screenshots(dir: String) -> Result<(), String> {
@@ -96,6 +96,7 @@ fn screenshots(dir: String) -> Result<(), String> {
         position: number("--position")?,
         time: number("--time")?,
         size,
+        scale: number("--scale")?.unwrap_or(1.0),
         focus: number("--focus")?,
     })
 }
