@@ -2,14 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Superseded PR runs are cancelled; runs on master queue instead, so a newer
+# Superseded PR runs are cancelled; runs on main queue instead, so a newer
 # push never cancels a Pages deploy that is already in progress.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -73,7 +73,7 @@ jobs:
         with:
           name: web-dist
           path: 3d-resume/dist
-      # Baseline for the size report: the newest sizes saved by a master
+      # Baseline for the size report: the newest sizes saved by a main
       # build (runs can read caches of the default branch).
       - name: Restore the size baseline
         uses: actions/cache/restore@v6
@@ -84,9 +84,9 @@ jobs:
       - name: Report bundle sizes and check the budget
         run: bash .github/scripts/web-size.sh 3d-resume/dist web-size-baseline.txt web-size.txt
       - name: Keep these sizes as the new baseline
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: cp web-size.txt web-size-baseline.txt
-      - if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@v6
         with:
           path: web-size-baseline.txt
@@ -94,7 +94,7 @@ jobs:
 
   deploy:
     name: Deploy to GitHub Pages
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [rust, latex, web]
     runs-on: ubuntu-latest
     concurrency:

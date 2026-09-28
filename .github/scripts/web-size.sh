@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Web bundle sizes for the CI job summary: raw, gzip and brotli per asset,
-# the brotli change from a baseline (the latest master build), and a budget
+# the brotli change from a baseline (the latest main build), and a budget
 # check on the brotli size, which is what browsers download.
 #
 # Usage: web-size.sh <dist dir> <baseline file> <output file>
@@ -48,9 +48,9 @@ failed=0
 {
   echo "### Web bundle"
   if [[ -f $baseline ]]; then
-    echo "Changes are relative to the latest master build."
+    echo "Changes are relative to the latest main build."
   else
-    echo "No master baseline yet (the first master build after this change saves one)."
+    echo "No baseline from main yet (the next main build saves one)."
   fi
   echo
   echo "| Asset | Raw | gzip | brotli | brotli change | brotli budget |"
