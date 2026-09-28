@@ -91,12 +91,24 @@ jobs:
           xcrun simctl bootstatus "$device" -b
           ditto -x -k resume-3d-ios-simulator.zip sim
           xcrun simctl install "$device" "sim/3D Resume.app"
-          xcrun simctl launch "$device" io.github.haraldreingruber.resume
-          sleep 20
           mkdir -p ios-screenshot
+          # SIMCTL_CHILD_* variables reach the app's environment.
+          SIMCTL_CHILD_RUST_LOG=info xcrun simctl launch \
+            --stdout="$PWD/ios-screenshot/stdout.txt" \
+            --stderr="$PWD/ios-screenshot/stderr.txt" \
+            "$device" io.github.haraldreingruber.resume
+          sleep 20
           xcrun simctl io "$device" screenshot ios-screenshot/simulator.png
+          echo "--- app log"; cat ios-screenshot/stderr.txt ios-screenshot/stdout.txt || true
           # Still running? (A crash would have ended it.)
           xcrun simctl spawn "$device" launchctl list | grep -q io.github.haraldreingruber.resume
+          # A blank (black) frame compresses to well under 150 KB; a rendered
+          # station is several hundred.
+          size=$(wc -c < ios-screenshot/simulator.png)
+          if [ "$size" -lt 150000 ]; then
+            echo "::error::The simulator screenshot looks blank ($size bytes): nothing rendered."
+            exit 1
+          fi
       - name: Upload the simulator screenshot
         if: ${{ !cancelled() && inputs.smoke_test }}
         uses: actions/upload-artifact@v7

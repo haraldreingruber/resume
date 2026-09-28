@@ -61,6 +61,8 @@ pub struct App {
     window: Option<Arc<Window>>,
     state: Option<State>,
     last_frame: Instant,
+    /// Frames presented so far (the first one is logged).
+    presented: u64,
     cursor: Option<PhysicalPosition<f64>>,
     /// Hover group under the cursor, and the one a mouse press started on.
     hovered: Option<u32>,
@@ -151,6 +153,7 @@ impl App {
             window: None,
             state: None,
             last_frame: Instant::now(),
+            presented: 0,
             cursor: None,
             hovered: None,
             pressed: None,
@@ -212,6 +215,12 @@ impl App {
         let camera = self.scene.camera(position, lens);
         let projection = UiLayer::projection(gpu.config.width as f32, gpu.config.height as f32);
         let presented = gpu.render(|ctx, view| renderer.draw(ctx, view, &camera, projection));
+        if presented {
+            self.presented += 1;
+            if self.presented == 1 {
+                log::info!("first frame presented");
+            }
+        }
         // Keep redrawing while the timeline or the particles move, and retry
         // a frame the surface skipped (e.g. right after the first
         // `configure()`) so a skipped frame is never the last one drawn.

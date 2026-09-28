@@ -20,8 +20,10 @@ cd "$here/../.."
 min_sdk=26
 ndk=${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:?set ANDROID_NDK_HOME}}
 toolchain="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
-build_tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-platform=$(ls -d "$ANDROID_HOME"/platforms/android-* | sort -V | tail -1)
+build_tools=$(ls -d "$ANDROID_HOME"/build-tools/* | grep -E '/[0-9.]+$' | sort -V | tail -1)
+# The newest released platform (numbered; previews like android-36.1-beta3
+# would make the APK target a preview SDK that phones refuse to install).
+platform=$(ls -d "$ANDROID_HOME"/platforms/android-* | grep -E '/android-[0-9]+$' | sort -V | tail -1)
 target_sdk=${platform##*-}
 
 # The library (loaded by NativeActivity) per ABI. Only Android builds it as

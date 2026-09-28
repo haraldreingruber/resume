@@ -23,6 +23,8 @@ pub struct Gpu {
     surface: Option<wgpu::Surface<'static>>,
     pub context: Context,
     pub config: wgpu::SurfaceConfiguration,
+    /// Frames the surface skipped so far (the first few are logged).
+    skipped: u32,
 }
 
 impl Gpu {
@@ -74,8 +76,17 @@ impl Gpu {
                 view_format,
             },
             config,
+            skipped: 0,
         };
         gpu.configure();
+        log::info!(
+            "surface: {:?} (drawn as {:?}), {}x{}, {:?}",
+            gpu.config.format,
+            gpu.context.view_format,
+            gpu.config.width,
+            gpu.config.height,
+            gpu.config.present_mode
+        );
         Ok(gpu)
     }
 
@@ -136,7 +147,12 @@ impl Gpu {
 
     /// The next frame to draw into, or `None` to skip this frame.
     fn acquire(&mut self) -> Option<wgpu::SurfaceTexture> {
-        match self.surface.as_ref()?.get_current_texture() {
+        let status = self.surface.as_ref()?.get_current_texture();
+        if !matches!(status, wgpu::CurrentSurfaceTexture::Success(_)) && self.skipped < 5 {
+            self.skipped += 1;
+            log::info!("frame skipped: {status:?}");
+        }
+        match status {
             wgpu::CurrentSurfaceTexture::Success(texture) => Some(texture),
             wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Timeout => None,
             wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
