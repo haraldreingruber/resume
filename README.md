@@ -84,4 +84,5 @@ bash 3d-resume/ios/build-simulator-app.sh resume-3d-ios.zip  # iOS Simulator app
 CI builds both phone apps on every PR (a debug-signed APK to sideload, and an iOS Simulator app);
 releases attach them next to the desktop apps.
 
-`cargo gen check` (also run in CI) fails when a generated file is out of date.
+`cargo gen check` (also run in CI) fails when a generated file is out of date. `cargo deny check` (also in CI)
+checks dependencies for security advisories, licenses and sources; Dependabot proposes updates weekly.

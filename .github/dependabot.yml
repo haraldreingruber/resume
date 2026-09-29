@@ -1,0 +1,21 @@
+# Weekly dependency updates: Cargo crates and GitHub Actions. Minor and patch
+# updates arrive together, one PR per ecosystem; major updates (e.g. a new
+# wgpu or winit) come as their own PRs, since they usually need code changes.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types: [minor, patch]
