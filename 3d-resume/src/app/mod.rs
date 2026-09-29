@@ -32,7 +32,7 @@ use crate::scene::timeline::Timeline;
 use crate::scene::{self, Action, Input, Lens, Metrics, Scene};
 use crate::ui::about;
 use crate::ui::focus::{self, Step};
-use crate::ui::{self, Button, Insets, Overlay, Panel, Switch, Switches, UiLayer};
+use crate::ui::{self, Button, Insets, Overlay, Panel, Rail, Switch, Switches, UiLayer};
 
 /// Timeline units per wheel line and per touch/trackpad pixel.
 const SCROLL_PER_LINE: f32 = 0.35;
@@ -92,6 +92,8 @@ pub struct App {
     input: Input,
     overlay_switch: u32,
     switches: Switches,
+    /// Hover groups of the timeline rail's markers, in station order.
+    rail: Vec<u32>,
     gpu_timing: bool,
     animating: bool,
     /// The overlay's switches: bloom's glow, and the x-ray view.
@@ -191,6 +193,7 @@ impl App {
         let overlay_switch = ui::overlay_switch(&mut scene);
         let shaders = ui::shader_links(&mut scene);
         let switches = ui::overlay_switches(&mut scene);
+        let rail = ui::rail_links(&mut scene);
         let start = options
             .station
             .as_deref()
@@ -214,6 +217,7 @@ impl App {
             graph: Vec::new(),
             overlay_switch,
             switches,
+            rail,
             gpu_timing: false,
             animating: false,
             glow: true,

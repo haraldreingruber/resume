@@ -14,7 +14,7 @@ struct Globals {
 struct Groups {
     // Per group: x = highlight, y = keyboard focus, z = fade-out (dimmed),
     // w = the active node of the skill map.
-    state: array<vec4<f32>, 64>,
+    state: array<vec4<f32>, 128>,
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;

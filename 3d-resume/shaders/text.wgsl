@@ -13,7 +13,7 @@ struct Groups {
     // Per group (group 0 is never highlighted): x = highlight (0..1),
     // y = keyboard focus (used by focus rings in shapes.wgsl), z = fade-out
     // (1 = hidden; the intro title while the particles form it).
-    state: array<vec4<f32>, 64>,
+    state: array<vec4<f32>, 128>,
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
