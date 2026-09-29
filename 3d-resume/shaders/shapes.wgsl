@@ -14,7 +14,7 @@ struct Groups {
     // Per group (group 0 is never highlighted): x = highlight (0..1),
     // y = keyboard focus (shows the group's focus rings), z = fade-out
     // (1 = hidden).
-    state: array<vec4<f32>, 64>,
+    state: array<vec4<f32>, 128>,
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;

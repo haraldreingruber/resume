@@ -103,8 +103,14 @@ impl App {
         if group == self.hovered {
             return;
         }
+        let rail = |group: Option<u32>| group.is_some_and(|g| self.rail.contains(&g));
+        let rail_changed = rail(self.hovered) || rail(group);
         self.hovered = group;
         self.update_groups();
+        if rail_changed {
+            // The hovered marker shows its station's name.
+            self.update_ui();
+        }
         if let Some(window) = &self.window {
             window.set_cursor(if group.is_some() {
                 CursorIcon::Pointer

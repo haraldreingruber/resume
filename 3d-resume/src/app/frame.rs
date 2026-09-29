@@ -105,6 +105,8 @@ impl App {
             } else {
                 self.publish_tab_leaves();
             }
+            // The rail highlights the new station.
+            self.update_ui();
         }
         if settled && Some(station) != self.shown_station {
             self.shown_station = Some(station);
@@ -158,6 +160,7 @@ impl App {
         self.overlay_switch = ui::overlay_switch(&mut scene);
         self.shaders = ui::shader_links(&mut scene);
         self.switches = ui::overlay_switches(&mut scene);
+        self.rail = ui::rail_links(&mut scene);
         self.scene = scene;
         (self.hovered, self.pressed, self.focused, self.pinned) = (None, None, None, None);
         // Swapping a running scene restarts the particles from their cloud:

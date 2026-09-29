@@ -16,7 +16,7 @@ use crate::scene::intro::{self, Intro};
 use crate::scene::{Input, Metrics, Scene};
 use crate::ui::about;
 use crate::ui::focus;
-use crate::ui::{self, Insets, Overlay, Panel, Switch, UiLayer};
+use crate::ui::{self, Insets, Overlay, Panel, Rail, Switch, UiLayer};
 
 /// The native window's default (logical) size.
 pub const DEFAULT_SIZE: [u32; 2] = [1280, 800];
@@ -168,6 +168,7 @@ pub fn run(request: &Request) -> Result<(), String> {
     let overlay_switch = ui::overlay_switch(&mut scene);
     let shaders = ui::shader_links(&mut scene);
     let switch_groups = ui::overlay_switches(&mut scene);
+    let rail_groups = ui::rail_links(&mut scene);
     let frames = frames(&scene, request)?;
 
     let ctx = pollster::block_on(context())?;
@@ -273,6 +274,13 @@ pub fn run(request: &Request) -> Result<(), String> {
             &buttons,
             panel.as_ref(),
             overlay.as_ref(),
+            Some(&Rail {
+                stops: scene.rail(),
+                groups: &rail_groups,
+                current: station,
+                hovered: None,
+                labels: !request.touch && scene.metrics() == crate::scene::WIDE,
+            }),
         );
         renderer.set_ui(&ctx, &ui);
         let mut panel_links: Vec<u32> = switches.iter().map(|switch| switch.group).collect();

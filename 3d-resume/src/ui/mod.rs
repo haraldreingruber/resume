@@ -1,8 +1,8 @@
 //! Screen-space layer in physical pixels (origin bottom-left, y up), drawn on
 //! top of the scene with an orthographic projection and no fading. It holds
-//! the About panel ("How this resume is built") and the performance overlay
-//! on every platform, and in the native app the "ⓘ · Skills · Text version ·
-//! PDF" buttons that the web page provides as HTML.
+//! the timeline rail, the About panel ("How this resume is built") and the
+//! performance overlay on every platform, and in the native app the "ⓘ ·
+//! Skills · Text version · PDF" buttons that the web page provides as HTML.
 
 pub mod about;
 pub mod focus;
@@ -13,7 +13,7 @@ use resume_model::about::ABOUT;
 use crate::debug::stats::{GraphFrame, HISTORY};
 use crate::render::shapes::ShapeInstance;
 use crate::render::text::{self, Font, GlyphInstance, Run, TextStyle, rgb};
-use crate::scene::{Action, Link, Scene};
+use crate::scene::{Action, Link, RailStop, Scene};
 
 const BUTTON_TEXT: [f32; 4] = rgb(0xC9D4DE);
 const BUTTON_BORDER: [f32; 4] = rgb(0x3E5A73);
@@ -87,6 +87,24 @@ pub fn shader_links(scene: &mut Scene) -> Vec<u32> {
         .collect()
 }
 
+/// The timeline rail's markers, registered as scene actions (flying to
+/// their station), in station order.
+pub fn rail_links(scene: &mut Scene) -> Vec<u32> {
+    let labels: Vec<String> = scene
+        .rail()
+        .iter()
+        .map(|stop| match stop.detail.as_str() {
+            "" => stop.label.clone(),
+            detail => format!("{}, {detail}", stop.label),
+        })
+        .collect();
+    labels
+        .iter()
+        .enumerate()
+        .map(|(station, label)| scene.add_action(Action::GoToStation(station), label))
+        .collect()
+}
+
 /// The performance overlay's switches, registered as scene actions.
 pub fn overlay_switches(scene: &mut Scene) -> Switches {
     Switches {
@@ -124,6 +142,20 @@ pub struct Panel<'a> {
     pub overlay_shown: bool,
     /// Whether to show key hints (there's a keyboard, not only touch).
     pub keys: bool,
+}
+
+/// The timeline rail: a marker per station along the left edge, the
+/// current one highlighted, years beside them (with a keyboard and mouse)
+/// and the hovered one's short name.
+pub struct Rail<'a> {
+    pub stops: &'a [RailStop],
+    /// Hover groups of the markers, in station order.
+    pub groups: &'a [u32],
+    pub current: usize,
+    pub hovered: Option<usize>,
+    /// Whether to show labels (with a keyboard and mouse, in the wide
+    /// layout); without, markers only, along the window's edge.
+    pub labels: bool,
 }
 
 /// The shown performance overlay: its heading and lines of numbers, the
@@ -168,6 +200,7 @@ impl UiLayer {
         buttons: &[Button],
         panel: Option<&Panel>,
         overlay: Option<&Overlay>,
+        rail: Option<&Rail>,
     ) -> Self {
         let mut layer = Self::default();
         let active = panel.map(|_| buttons.iter().find(|(label, _)| *label == "i"));
@@ -187,6 +220,16 @@ impl UiLayer {
             ];
             layer.panel(area, scale, panel);
         }
+        if let Some(rail) = rail {
+            // Without labels (phones, narrow windows) it hugs the edge, clear
+            // of the station's text.
+            let margin = if rail.labels { MARGIN } else { 2.0 };
+            let left = margin * scale + insets.left;
+            // The middle of the window's height, clear of the overlay above
+            // and the buttons below.
+            let (bottom, top) = (height * 0.2 + insets.bottom, height * 0.78 - insets.top);
+            layer.rail(left, [bottom, top], scale, rail);
+        }
         if let Some(overlay) = overlay {
             let top_left = [
                 MARGIN * scale + insets.left,
@@ -196,6 +239,69 @@ impl UiLayer {
             layer.overlay(top_left, max_width, scale, overlay);
         }
         layer
+    }
+
+    /// The timeline rail at `left`, spread over `[bottom, top]`: a line with
+    /// a marker per station (the first at the top), the current one larger
+    /// and in the accent color, labels beside them.
+    fn rail(&mut self, left: f32, [bottom, top]: [f32; 2], scale: f32, rail: &Rail) {
+        let count = rail.stops.len();
+        if count < 2 {
+            return;
+        }
+        let x = left + 6.0 * scale;
+        let step = (top - bottom) / (count - 1) as f32;
+        let y_of = |i: usize| top - i as f32 * step;
+        self.shapes.push(ShapeInstance::filled(
+            [x - 0.5 * scale, bottom, x + 0.5 * scale, top],
+            0.0,
+            0.0,
+            GRAPH_GRID,
+        ));
+        let size = 11.0 * scale;
+        for (i, stop) in rail.stops.iter().enumerate() {
+            let y = y_of(i);
+            let group = rail.groups.get(i).copied().unwrap_or(0);
+            let current = i == rail.current;
+            let small = if rail.labels { 1.0 } else { 0.75 };
+            let (radius, color) = if current {
+                (5.0 * scale * small, FOCUS)
+            } else {
+                (3.0 * scale * small, MUTED)
+            };
+            if current {
+                // A soft halo, like the skill map's nodes.
+                self.shapes.push(ShapeInstance::dot(
+                    [x, y],
+                    0.0,
+                    9.0 * scale * small,
+                    [FOCUS[0], FOCUS[1], FOCUS[2], 0.25],
+                ));
+            }
+            self.shapes
+                .push(ShapeInstance::dot([x, y], 0.0, radius, color).group(group));
+            let mut right = x + 12.0 * scale;
+            if rail.labels {
+                let text = match (rail.hovered == Some(i), stop.detail.as_str()) {
+                    (true, detail) if !detail.is_empty() => format!("{} · {detail}", stop.label),
+                    _ => stop.label.clone(),
+                };
+                let (font, color) = if current {
+                    (Font::Bold, BUTTON_TEXT)
+                } else {
+                    (Font::Regular, MUTED)
+                };
+                let style = TextStyle::new(font, size, color).group(group);
+                let start = Vec3::new(x + 12.0 * scale, y + size * 0.62, 0.0);
+                text::layout(&text, style, start, &mut self.glyphs);
+                right = start.x + text::width(font, size, &text);
+            }
+            // Click area: the marker and its label, the row's height (at
+            // least a finger's width on touch screens).
+            let half = (step / 2.0).min(14.0 * scale).max(6.0 * scale);
+            let hit = [x - 12.0 * scale, y - half, right + 6.0 * scale, y + half];
+            self.hits.push((hit, group));
+        }
     }
 
     /// The performance overlay, top-left: its heading and lines, the
@@ -675,7 +781,7 @@ mod tests {
     #[test]
     fn picks_buttons_in_the_bottom_right_corner() {
         let buttons = [("Text version", 5), ("PDF", 6)];
-        let layer = UiLayer::new(SIZE, 1.0, Insets::default(), &buttons, None, None);
+        let layer = UiLayer::new(SIZE, 1.0, Insets::default(), &buttons, None, None, None);
         assert_eq!(layer.hits.len(), 2);
         // "PDF" is rightmost.
         let ([x0, y0, x1, y1], group) = layer.hits[0];
@@ -694,6 +800,9 @@ mod tests {
         let overlay = overlay_switch(&mut scene);
         let shaders = shader_links(&mut scene);
         let switches = overlay_switches(&mut scene);
+        let rail = rail_links(&mut scene);
+        assert_eq!(rail.len(), scene.station_count());
+        assert!(rail.iter().all(|&group| group != 0));
         assert!(source != 0 && overlay != 0);
         assert!(buttons.iter().all(|&(_, group)| group != 0));
         assert_eq!(shaders.len(), ABOUT.shaders().count());
@@ -739,7 +848,7 @@ mod tests {
             switches: &switches,
             keys: true,
         };
-        let layer = UiLayer::new(SIZE, 1.0, insets, &[], None, Some(&overlay));
+        let layer = UiLayer::new(SIZE, 1.0, insets, &[], None, Some(&overlay), None);
         let [x0, y0, x1, y1] = layer.overlay.expect("shown");
         assert_eq!((x0, y1), (MARGIN + 20.0, 600.0 - MARGIN - 50.0));
         assert!(x1 < 420.0 && layer.covers(x0 + 5.0, y1 - 5.0));
@@ -761,8 +870,37 @@ mod tests {
     }
 
     #[test]
+    fn the_rail_marks_every_station_and_picks_markers() {
+        let stops: Vec<RailStop> = ["Intro", "Now", "2019", "Skills", "Contact"]
+            .iter()
+            .map(|label| RailStop {
+                label: label.to_string(),
+                detail: String::new(),
+            })
+            .collect();
+        let groups = [20, 21, 22, 23, 24];
+        let rail = Rail {
+            stops: &stops,
+            groups: &groups,
+            current: 1,
+            hovered: None,
+            labels: true,
+        };
+        let layer = UiLayer::new(SIZE, 1.0, Insets::default(), &[], None, None, Some(&rail));
+        let rows: Vec<([f32; 4], u32)> = layer.hits.clone();
+        assert_eq!(rows.iter().map(|&(_, g)| g).collect::<Vec<_>>(), groups);
+        // Top to bottom, left edge, not overlapping.
+        for pair in rows.windows(2) {
+            assert!(pair[0].0[1] >= pair[1].0[3] - 0.01, "rows overlap");
+        }
+        let [x0, y0, x1, y1] = rows[2].0;
+        assert!(x0 < 40.0);
+        assert_eq!(layer.pick((x0 + x1) / 2.0, (y0 + y1) / 2.0), Some(22));
+    }
+
+    #[test]
     fn a_one_letter_button_is_round() {
-        let layer = UiLayer::new(SIZE, 1.0, Insets::default(), &[("i", 4)], None, None);
+        let layer = UiLayer::new(SIZE, 1.0, Insets::default(), &[("i", 4)], None, None, None);
         let [x0, y0, x1, y1] = layer.hits[0].0;
         assert!((x1 - x0 - (y1 - y0)).abs() < 0.01);
     }
@@ -774,7 +912,7 @@ mod tests {
             bottom: 40.0,
             ..Insets::default()
         };
-        let layer = UiLayer::new(SIZE, 1.0, insets, &[("PDF", 6)], None, None);
+        let layer = UiLayer::new(SIZE, 1.0, insets, &[("PDF", 6)], None, None, None);
         let [_, y0, x1, _] = layer.hits[0].0;
         assert!(x1 <= 800.0 - 30.0 - MARGIN && y0 >= 40.0 + MARGIN);
     }
@@ -789,7 +927,7 @@ mod tests {
             overlay_shown: false,
             keys: true,
         };
-        UiLayer::new(size, 1.0, insets, buttons, Some(&panel), None)
+        UiLayer::new(size, 1.0, insets, buttons, Some(&panel), None, None)
     }
 
     #[test]

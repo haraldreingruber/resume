@@ -32,8 +32,8 @@ impl App {
         switches
     }
 
-    /// Rebuilds the screen-space layer: the buttons, and the About panel if
-    /// it's open.
+    /// Rebuilds the screen-space layer: the buttons, the timeline rail, and
+    /// the About panel and performance overlay if shown.
     pub(super) fn update_ui(&mut self) {
         let switches = self.overlay_switches();
         let Some(state) = &mut self.state else { return };
@@ -60,6 +60,15 @@ impl App {
             switches: &switches,
             keys: self.input == Input::Keyboard,
         });
+        let rail = Rail {
+            stops: self.scene.rail(),
+            groups: &self.rail,
+            current: self.station,
+            hovered: self
+                .hovered
+                .and_then(|group| self.rail.iter().position(|&g| g == group)),
+            labels: self.input == Input::Keyboard && self.scene.metrics() == scene::WIDE,
+        };
         state.ui = UiLayer::new(
             size,
             scale,
@@ -67,6 +76,7 @@ impl App {
             &self.buttons,
             panel.as_ref(),
             overlay.as_ref(),
+            Some(&rail),
         );
         state.renderer.set_ui(&state.gpu.context, &state.ui);
     }

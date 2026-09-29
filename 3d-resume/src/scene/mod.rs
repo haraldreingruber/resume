@@ -118,7 +118,7 @@ pub const NEAR_FADE: (f32, f32) = (-2.8, -1.2);
 pub const FAR_FADE: (f32, f32) = (1.8, 4.5);
 
 /// Hover groups are indices into a 64-entry uniform array; 0 means none.
-pub const MAX_GROUPS: usize = 64;
+pub const MAX_GROUPS: usize = 128;
 /// The group of the name on the intro: reserved (never a link), so the
 /// renderer can fade the crisp title while the particles form it.
 pub const TITLE_GROUP: u32 = MAX_GROUPS as u32 - 1;
@@ -187,6 +187,8 @@ pub struct Relations {
 }
 
 pub struct Scene {
+    /// One marker per station for the timeline rail.
+    rail: Vec<RailStop>,
     stations: Vec<Station>,
     /// Station anchors, the control points of the camera path.
     points: Vec<Vec3>,
@@ -280,6 +282,15 @@ pub struct Camera {
     pub focus_distance: f32,
 }
 
+/// A station's marker on the timeline rail (the screen-space layer): its
+/// label (a year, or "Intro", "Skills", "Contact") and a short name shown on
+/// hover.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RailStop {
+    pub label: String,
+    pub detail: String,
+}
+
 /// A timeline entry of any kind.
 #[derive(Clone, Copy)]
 enum Entry<'a> {
@@ -310,6 +321,19 @@ impl Entry<'_> {
             Entry::Job(w) => w.accent,
             Entry::Project(p) => p.accent,
             Entry::Education(e) => e.accent,
+        }
+    }
+
+    /// A short name for the timeline rail: the skill map's short label, or
+    /// for education the degree (else the institution).
+    fn rail_detail(&self) -> String {
+        match self {
+            Entry::Job(w) => w.short_label().to_owned(),
+            Entry::Project(p) => p.short_label().to_owned(),
+            Entry::Education(e) => e
+                .study_type
+                .clone()
+                .unwrap_or_else(|| e.institution.clone()),
         }
     }
 
@@ -376,6 +400,21 @@ impl Scene {
             };
             Vec3::new(side, 0.6, -(i as f32) * SPACING)
         };
+        let stop = |label: &str, detail: String| RailStop {
+            label: label.to_owned(),
+            detail,
+        };
+        let rail: Vec<RailStop> = std::iter::once(stop("Intro", String::new()))
+            .chain(
+                entries
+                    .iter()
+                    .map(|entry| stop(&entry.year_label(), entry.rail_detail())),
+            )
+            .chain([
+                stop("Skills", String::new()),
+                stop("Contact", String::new()),
+            ])
+            .collect();
         let mut stations = vec![Station::new("intro", anchor(0))];
         stations.extend(
             entries
@@ -437,6 +476,7 @@ impl Scene {
             lines.extend(block.lines);
         }
         Self {
+            rail,
             stations,
             points,
             glyphs,
@@ -480,6 +520,11 @@ impl Scene {
                 .collect(),
             nodes,
         })
+    }
+
+    /// The timeline rail's markers, one per station.
+    pub fn rail(&self) -> &[RailStop] {
+        &self.rail
     }
 
     pub fn station_count(&self) -> usize {
@@ -1263,6 +1308,24 @@ fn catmull_rom(points: &[Vec3], t: f32) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_rail_has_a_stop_per_station() {
+        let scene = Scene::new(&crate::content::resume());
+        let rail = scene.rail();
+        assert_eq!(rail.len(), scene.station_count());
+        let labels: Vec<&str> = rail.iter().map(|stop| stop.label.as_str()).collect();
+        assert_eq!(labels.first(), Some(&"Intro"));
+        assert_eq!(labels[labels.len() - 2..], ["Skills", "Contact"]);
+        // Entries: a year (or "Now") and a short name.
+        for stop in &rail[1..rail.len() - 2] {
+            assert!(
+                stop.label == "Now" || stop.label.parse::<u16>().is_ok(),
+                "{stop:?}"
+            );
+            assert!(!stop.detail.is_empty(), "{stop:?}");
+        }
+    }
     use crate::render::shapes::FOCUS_RING;
 
     #[test]
