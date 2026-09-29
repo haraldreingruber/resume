@@ -19,7 +19,9 @@ summary=${GITHUB_STEP_SUMMARY:-/dev/stdout}
 
 : > "$out"
 for asset in wasm js; do
-  files=("$dist"/*."$asset")
+  # The build's own files (resume-3d-<hash>.js, resume-3d-<hash>_bg.wasm), not
+  # others like the service worker (sw.js).
+  files=("$dist"/resume-3d-*."$asset")
   if [[ ${#files[@]} -ne 1 || ! -f ${files[0]} ]]; then
     echo "::error::expected exactly one .$asset file in $dist"
     exit 1
