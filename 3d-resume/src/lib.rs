@@ -9,6 +9,7 @@ mod app;
 mod content;
 mod focus;
 mod gpu;
+mod gpu_timer;
 #[cfg(not(target_arch = "wasm32"))]
 mod icon;
 mod intro;
@@ -21,6 +22,7 @@ mod scene;
 mod screenshot;
 mod shapes;
 mod skillmap;
+mod stats;
 mod text;
 mod timeline;
 mod ui;
@@ -77,6 +79,7 @@ fn android_main(android: winit::platform::android::activity::AndroidApp) {
         app::Options {
             station: None,
             reduced_motion: false,
+            stats: false,
         },
     );
 }
@@ -95,28 +98,34 @@ fn start(event_loop: EventLoop<app::AppEvent>, options: app::Options) {
     }
 }
 
-/// Deep link and reduced motion from the page URL / media query.
+/// Deep link, reduced motion and the performance overlay from the page URL
+/// (`?station=<id>`, `?stats`) and the media query.
 #[cfg(target_arch = "wasm32")]
 fn options() -> app::Options {
     app::Options {
         station: web::query_param("station"),
         reduced_motion: web::prefers_reduced_motion(),
+        stats: web::has_query_param("stats"),
     }
 }
 
-/// `--station <id|index>` and `--reduced-motion`.
+/// `--station <id|index>`, `--reduced-motion` and `--stats` (performance
+/// overlay).
 #[cfg(not(target_arch = "wasm32"))]
 fn options() -> app::Options {
+    let flag = |name| std::env::args().any(|a| a == name);
     app::Options {
         station: arg("--station"),
-        reduced_motion: std::env::args().any(|a| a == "--reduced-motion"),
+        reduced_motion: flag("--reduced-motion"),
+        stats: flag("--stats"),
     }
 }
 
 /// `--screenshots <dir> [--station <id|index> | --position <t>] [--time <s>]
-/// [--size 1280x800] [--scale <n>] [--focus <n>] [--about]`: renders the
-/// stations, two frames of the particle intro and the About panel (or one
-/// frame) headlessly to PNG files and exits.
+/// [--size 1280x800] [--scale <n>] [--focus <n>] [--about] [--stats]`:
+/// renders the stations, two frames of the particle intro and the About
+/// panel (or one frame) headlessly to PNG files and exits. `--stats` adds
+/// the performance overlay.
 #[cfg(not(target_arch = "wasm32"))]
 fn screenshots(dir: String) -> Result<(), String> {
     let size = match arg("--size") {
@@ -133,6 +142,7 @@ fn screenshots(dir: String) -> Result<(), String> {
         scale: number("--scale")?.unwrap_or(1.0),
         focus: number("--focus")?,
         about: std::env::args().any(|a| a == "--about"),
+        stats: std::env::args().any(|a| a == "--stats"),
     })
 }
 

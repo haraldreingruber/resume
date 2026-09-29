@@ -35,6 +35,8 @@ impl Context {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some(label),
+                // For the performance overlay's GPU times, where available.
+                required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
                 required_limits: wgpu::Limits::default().or_worse_values_from(&adapter.limits()),
                 ..Default::default()
             })

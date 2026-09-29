@@ -1,8 +1,8 @@
 //! Screen-space layer in physical pixels (origin bottom-left, y up), drawn on
 //! top of the scene with an orthographic projection and no fading. It holds
-//! the About panel ("How this resume is built") on every platform, and in
-//! the native app the "ⓘ · Skills · Text version · PDF" buttons that the web
-//! page provides as HTML.
+//! the About panel ("How this resume is built") and the performance overlay
+//! on every platform, and in the native app the "ⓘ · Skills · Text version ·
+//! PDF" buttons that the web page provides as HTML.
 
 use glam::{Mat4, Vec3};
 use resume_model::about::ABOUT;
@@ -21,6 +21,7 @@ const FOCUS: [f32; 4] = rgb(0x6DB3E8);
 const PANEL_FILL: [f32; 4] = rgb(0x0A121C);
 const PANEL_TITLE: [f32; 4] = rgb(0xF2F6FA);
 const SESSION: [f32; 4] = rgb(0x6FC2C9);
+const MUTED: [f32; 4] = rgb(0x8AA0B4);
 
 /// Margin around the controls and the panel, in logical pixels.
 const MARGIN: f32 = 16.0;
@@ -55,6 +56,12 @@ pub fn source_link(scene: &mut Scene) -> u32 {
     scene.add_action(action, ABOUT.source_label)
 }
 
+/// The About panel's switch for the performance overlay, registered as a
+/// scene action.
+pub fn overlay_switch(scene: &mut Scene) -> u32 {
+    scene.add_action(Action::ToggleStats, "Performance overlay")
+}
+
 /// How far (physical pixels) the controls stay in from the window's edges
 /// beyond their margin, e.g. clear of a phone's notch and home indicator.
 #[derive(Debug, Clone, Copy, Default)]
@@ -62,13 +69,17 @@ pub struct Insets {
     pub top: f32,
     pub right: f32,
     pub bottom: f32,
+    pub left: f32,
 }
 
-/// The open About panel: this session's graphics backend and GPU, and the
-/// hover group of the source link.
+/// The open About panel: this session's graphics backend and GPU, the hover
+/// groups of the source link and of the performance overlay's switch, and
+/// whether the overlay is shown.
 pub struct Panel<'a> {
     pub session: &'a str,
     pub source: u32,
+    pub overlay: u32,
+    pub overlay_shown: bool,
 }
 
 #[derive(Default)]
@@ -78,11 +89,14 @@ pub struct UiLayer {
     hits: Vec<([f32; 4], u32)>,
     /// The panel's box: it hides the scene under it from the pointer.
     panel: Option<[f32; 4]>,
+    /// The performance overlay's box: it hides the scene too.
+    overlay: Option<[f32; 4]>,
 }
 
 impl UiLayer {
-    /// The buttons in the bottom-right corner, and the panel (if open) above
-    /// them, sized in logical pixels times `scale` for a `width` × `height`
+    /// The buttons in the bottom-right corner, the panel (if open) above
+    /// them and the performance overlay's `lines` (if shown) in the top-left
+    /// corner, sized in logical pixels times `scale` for a `width` × `height`
     /// window. The About button shows as pressed while the panel is open.
     pub fn new(
         [width, height]: [f32; 2],
@@ -90,6 +104,7 @@ impl UiLayer {
         insets: Insets,
         buttons: &[Button],
         panel: Option<&Panel>,
+        overlay: Option<&[String]>,
     ) -> Self {
         let mut layer = Self::default();
         let active = panel.map(|_| buttons.iter().find(|(label, _)| *label == "i"));
@@ -102,14 +117,62 @@ impl UiLayer {
                 10.0 * scale
             };
             let area = [
-                MARGIN * scale,
+                MARGIN * scale + insets.left,
                 row_top + gap,
                 width - MARGIN * scale - insets.right,
                 height - MARGIN * scale - insets.top,
             ];
             layer.panel(area, scale, panel);
         }
+        if let Some(lines) = overlay {
+            let top_left = [
+                MARGIN * scale + insets.left,
+                height - MARGIN * scale - insets.top,
+            ];
+            let max_width = width - 2.0 * MARGIN * scale - insets.left - insets.right;
+            layer.overlay(top_left, max_width, scale, lines);
+        }
         layer
+    }
+
+    /// The performance overlay: its heading and lines in a box, top-left.
+    fn overlay(&mut self, [left, top]: [f32; 2], max_width: f32, scale: f32, lines: &[String]) {
+        let pad = 10.0 * scale;
+        let size = 12.5 * scale;
+        let style = TextStyle::new(Font::Regular, size, BUTTON_TEXT).wrap(max_width - 2.0 * pad);
+        let width = lines
+            .iter()
+            .map(|line| text::measure(line, style)[0])
+            .fold(0.0, f32::max)
+            + 2.0 * pad;
+        let mut glyphs = Vec::new();
+        let mut cursor = Vec3::new(left + pad, top - pad, 0.0);
+        for (i, line) in lines.iter().enumerate() {
+            let style = if i == 0 {
+                TextStyle {
+                    font: Font::Bold,
+                    color: PANEL_TITLE,
+                    ..style
+                }
+            } else {
+                style
+            };
+            cursor.y -= text::layout(line, style, cursor, &mut glyphs) + 3.0 * scale;
+        }
+        let bottom = cursor.y + 3.0 * scale - pad;
+        let rect = [left, bottom, left + width, top];
+        let radius = 8.0 * scale;
+        self.shapes
+            .push(ShapeInstance::filled(rect, 0.0, radius, PANEL_FILL));
+        self.shapes.push(ShapeInstance::outlined(
+            rect,
+            0.0,
+            radius,
+            scale,
+            BUTTON_BORDER,
+        ));
+        self.glyphs.extend(glyphs);
+        self.overlay = Some(rect);
     }
 
     /// Pill buttons in the bottom-right corner, right to left in the given
@@ -239,9 +302,13 @@ impl UiLayer {
             .map(|&(_, group)| group)
     }
 
-    /// Whether `(x, y)` is on the open panel (which hides the scene there).
+    /// Whether `(x, y)` is on the open panel or the overlay (which hide the
+    /// scene there).
     pub fn covers(&self, x: f32, y: f32) -> bool {
-        self.panel.is_some_and(|rect| contains(rect, x, y))
+        [self.panel, self.overlay]
+            .into_iter()
+            .flatten()
+            .any(|rect| contains(rect, x, y))
     }
 
     /// Maps physical pixels (origin bottom-left) to clip space.
@@ -326,8 +393,22 @@ impl PanelContent {
             ..run(ABOUT.source_label, Font::Bold, FOCUS)
         };
         let size = body.size;
-        let paragraph = text(&mut content, &[link], body, 0.0);
-        for (group, [x0, y0, x1, y1]) in paragraph.boxes {
+        let mut boxes = text(&mut content, &[link], body, 8.0).boxes;
+        let switch = Run {
+            group: panel.overlay,
+            ..run(
+                if panel.overlay_shown {
+                    "Hide performance overlay"
+                } else {
+                    "Show performance overlay"
+                },
+                Font::Bold,
+                FOCUS,
+            )
+        };
+        let key = run(" (P)", Font::Regular, MUTED);
+        boxes.extend(text(&mut content, &[switch, key], body, 0.0).boxes);
+        for (group, [x0, y0, x1, y1]) in boxes {
             // Underline, focus ring and a slightly enlarged hit region, as
             // for links in the scene.
             let underline = y0 + (y1 - y0) * 0.17;
@@ -361,7 +442,7 @@ mod tests {
     #[test]
     fn picks_buttons_in_the_bottom_right_corner() {
         let buttons = [("Text version", 5), ("PDF", 6)];
-        let layer = UiLayer::new(SIZE, 1.0, Insets::default(), &buttons, None);
+        let layer = UiLayer::new(SIZE, 1.0, Insets::default(), &buttons, None, None);
         assert_eq!(layer.hits.len(), 2);
         // "PDF" is rightmost.
         let ([x0, y0, x1, y1], group) = layer.hits[0];
@@ -377,12 +458,29 @@ mod tests {
         let mut scene = Scene::new(&crate::content::resume());
         let buttons = native_buttons(&mut scene);
         let source = source_link(&mut scene);
-        assert!(source != 0 && buttons.iter().all(|&(_, group)| group != 0));
+        let overlay = overlay_switch(&mut scene);
+        assert!(source != 0 && overlay != 0);
+        assert!(buttons.iter().all(|&(_, group)| group != 0));
+    }
+
+    #[test]
+    fn the_overlay_sits_top_left_and_hides_the_scene() {
+        let lines = ["Performance", "60 fps · frame 16.7 ms (max 18.2)"].map(String::from);
+        let insets = Insets {
+            top: 50.0,
+            left: 20.0,
+            ..Insets::default()
+        };
+        let layer = UiLayer::new(SIZE, 1.0, insets, &[], None, Some(&lines));
+        let [x0, _, x1, y1] = layer.overlay.expect("shown");
+        assert_eq!((x0, y1), (MARGIN + 20.0, 600.0 - MARGIN - 50.0));
+        assert!(x1 < 400.0 && layer.covers(x0 + 5.0, y1 - 5.0));
+        assert!(!layer.glyphs.is_empty());
     }
 
     #[test]
     fn a_one_letter_button_is_round() {
-        let layer = UiLayer::new(SIZE, 1.0, Insets::default(), &[("i", 4)], None);
+        let layer = UiLayer::new(SIZE, 1.0, Insets::default(), &[("i", 4)], None, None);
         let [x0, y0, x1, y1] = layer.hits[0].0;
         assert!((x1 - x0 - (y1 - y0)).abs() < 0.01);
     }
@@ -390,11 +488,11 @@ mod tests {
     #[test]
     fn keeps_buttons_inside_the_insets() {
         let insets = Insets {
-            top: 0.0,
             right: 30.0,
             bottom: 40.0,
+            ..Insets::default()
         };
-        let layer = UiLayer::new(SIZE, 1.0, insets, &[("PDF", 6)], None);
+        let layer = UiLayer::new(SIZE, 1.0, insets, &[("PDF", 6)], None, None);
         let [_, y0, x1, _] = layer.hits[0].0;
         assert!(x1 <= 800.0 - 30.0 - MARGIN && y0 >= 40.0 + MARGIN);
     }
@@ -404,8 +502,10 @@ mod tests {
         let panel = Panel {
             session: "Vulkan on NVIDIA GeForce GTX 960M",
             source: 9,
+            overlay: 10,
+            overlay_shown: false,
         };
-        UiLayer::new(size, 1.0, insets, buttons, Some(&panel))
+        UiLayer::new(size, 1.0, insets, buttons, Some(&panel), None)
     }
 
     #[test]
@@ -413,8 +513,8 @@ mod tests {
         let buttons = [("i", 4), ("PDF", 6)];
         let insets = Insets {
             top: 50.0,
-            right: 0.0,
             bottom: 30.0,
+            ..Insets::default()
         };
         // Desktop, phone (portrait and landscape), and a tiny window.
         for size in [
@@ -449,10 +549,12 @@ mod tests {
     #[test]
     fn the_panel_link_is_clickable_and_its_box_covers_the_scene() {
         let layer = open([1280.0, 800.0], Insets::default(), &[("i", 4)]);
-        let (rect, _) = *layer.hits.iter().find(|(_, g)| *g == 9).expect("link");
-        let [x0, y0, x1, y1] = rect;
-        let (x, y) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
-        assert_eq!(layer.pick(x, y), Some(9));
+        for group in [9, 10] {
+            let (rect, _) = *layer.hits.iter().find(|(_, g)| *g == group).expect("link");
+            let [x0, y0, x1, y1] = rect;
+            let (x, y) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+            assert_eq!(layer.pick(x, y), Some(group));
+        }
         let [px0, py0, _, py1] = layer.panel.expect("open");
         assert!(layer.covers(px0 + 2.0, (py0 + py1) / 2.0));
         assert!(!layer.covers(10.0, 790.0));

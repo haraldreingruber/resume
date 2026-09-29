@@ -74,7 +74,7 @@ Workflow:
 # 1. Edit content/resume.yaml (VS Code validates it against content/resume.schema.json)
 cargo gen all        # 2. regenerate LaTeX data, README.md, plain.html, schema
 sh latex/build.sh    # 3. build the PDF
-cargo run -p resume-3d --release         # 3D resume, native (--station dedalus to start there)
+cargo run -p resume-3d --release         # 3D resume, native (--station dedalus to start there, --stats for the performance overlay)
 cd 3d-resume && trunk serve --open       # 3D resume, browser (needs WebGPU)
 cargo run -p resume-3d -- --screenshots shots   # every station as a PNG, no window needed
 bash 3d-resume/android/build-apk.sh resume-3d.apk            # Android development APK (SDK + NDK)

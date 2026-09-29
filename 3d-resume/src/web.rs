@@ -38,6 +38,19 @@ pub fn query_param(name: &str) -> Option<String> {
         .map(|(_, value)| value.to_owned())
 }
 
+/// Whether the page URL has a query parameter, with or without a value
+/// (`?stats`).
+pub fn has_query_param(name: &str) -> bool {
+    web_sys::window()
+        .and_then(|window| window.location().search().ok())
+        .is_some_and(|search| {
+            search
+                .trim_start_matches('?')
+                .split('&')
+                .any(|pair| pair.split('=').next() == Some(name))
+        })
+}
+
 /// Shows the station in view in the address bar (`?station=<id>`, or no
 /// parameter for the intro), keeping other parameters. Replaces the current
 /// history entry, so Back still leaves the page.

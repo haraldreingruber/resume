@@ -1,13 +1,15 @@
 //! Draws a frame: gradient background, the scene's lines (skill map) and
 //! shapes, the intro particles and the MSDF glyphs, then the screen-space
-//! layer (native buttons) on top. Draws into any texture view: the window surface or an
-//! offscreen screenshot target.
+//! layer (buttons, panels) on top. Draws into any texture view: the window
+//! surface or an offscreen screenshot target. With timing on (performance
+//! overlay), it measures its passes on the GPU.
 
 use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 use wgpu::util::DeviceExt;
 
 use crate::gpu::Context;
+use crate::gpu_timer::GpuTimer;
 use crate::intro::Step;
 use crate::lines::LineInstance;
 use crate::particles::Particles;
@@ -15,6 +17,7 @@ use crate::scene::{
     Camera, FAR_FADE, MAP_DIM, MAX_GROUPS, NEAR_FADE, Relations, Scene, TITLE_GROUP,
 };
 use crate::shapes::ShapeInstance;
+use crate::stats::{DrawCounts, GpuTimes};
 use crate::text::{self, GlyphInstance};
 use crate::ui::UiLayer;
 
@@ -54,6 +57,14 @@ impl Instances {
         }))
     }
 
+    fn count(&self) -> u32 {
+        self.0.as_ref().map_or(0, |(_, count)| *count)
+    }
+
+    fn bytes(&self) -> u64 {
+        self.0.as_ref().map_or(0, |(buffer, _)| buffer.size())
+    }
+
     /// Four vertices (a triangle strip quad) per instance.
     fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         if let Some((buffer, count)) = &self.0 {
@@ -79,6 +90,9 @@ pub struct Renderer {
     particles: Option<Particles>,
     /// Layout of the layers' bind groups (for re-creating the particles).
     bind_layout: wgpu::BindGroupLayout,
+    /// GPU timing for the performance overlay, while it's shown (and the
+    /// GPU has timestamp queries).
+    timer: Option<GpuTimer>,
 }
 
 /// What `groups` holds.
@@ -273,6 +287,7 @@ impl Renderer {
             ui,
             particles,
             bind_layout: layout,
+            timer: None,
         }
     }
 
@@ -363,13 +378,53 @@ impl Renderer {
     /// Runs one frame of the intro particles' simulation.
     pub fn step_particles(&mut self, ctx: &Context, step: &Step) {
         if let Some(particles) = &mut self.particles {
-            particles.step(ctx, step);
+            let timestamps = self.timer.as_mut().and_then(GpuTimer::compute_writes);
+            particles.step(ctx, step, timestamps);
         }
+    }
+
+    /// Turns GPU timing on or off; returns whether the GPU can time.
+    pub fn set_timing(&mut self, ctx: &Context, on: bool) -> bool {
+        self.timer = if on { GpuTimer::new(ctx) } else { None };
+        self.timer.is_some()
+    }
+
+    /// GPU times of the newest timed frame that finished since last asked.
+    pub fn gpu_times(&mut self, ctx: &Context) -> Option<GpuTimes> {
+        self.timer.as_mut()?.collect(ctx)
+    }
+
+    /// Instances drawn per frame.
+    pub fn counts(&self) -> DrawCounts {
+        let layers = [&self.world, &self.ui];
+        let sum = |count: fn(&Layer) -> u32| layers.iter().map(|l| count(l)).sum();
+        DrawCounts {
+            glyphs: sum(|l| l.glyphs.count()),
+            shapes: sum(|l| l.shapes.count()),
+            lines: sum(|l| l.lines.count()),
+            particles: self.particles.as_ref().map_or(0, Particles::drawn),
+        }
+    }
+
+    /// The GPU memory of its buffers and textures (not the window's
+    /// surface).
+    pub fn gpu_bytes(&self) -> u64 {
+        let [width, height] = text::ATLAS_SIZE;
+        let atlas = u64::from(width) * u64::from(height) * 4;
+        let layers: u64 = [&self.world, &self.ui]
+            .iter()
+            .map(|l| l.globals.size() + l.glyphs.bytes() + l.shapes.bytes() + l.lines.bytes())
+            .sum();
+        atlas
+            + layers
+            + self.groups.size()
+            + self.particles.as_ref().map_or(0, Particles::bytes)
+            + self.timer.as_ref().map_or(0, GpuTimer::bytes)
     }
 
     /// Draws a frame into `target` (a view in `ctx.view_format`).
     pub fn draw(
-        &self,
+        &mut self,
         ctx: &Context,
         target: &wgpu::TextureView,
         camera: &Camera,
@@ -411,7 +466,7 @@ impl Renderer {
                     },
                 })],
                 depth_stencil_attachment: None,
-                timestamp_writes: None,
+                timestamp_writes: self.timer.as_mut().and_then(GpuTimer::render_writes),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -433,7 +488,13 @@ impl Renderer {
                 layer.glyphs.draw(&mut pass);
             }
         }
+        if let Some(timer) = &mut self.timer {
+            timer.resolve(&mut encoder);
+        }
         ctx.queue.submit([encoder.finish()]);
+        if let Some(timer) = &mut self.timer {
+            timer.map();
+        }
     }
 }
 

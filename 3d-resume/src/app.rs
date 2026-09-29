@@ -1,7 +1,7 @@
 //! winit application: creates the window, initializes the GPU (async on the
 //! web), turns input into timeline movement, link clicks, keyboard focus,
-//! the About panel and fullscreen toggles, runs the particle intro, and
-//! renders on demand.
+//! the About panel, the performance overlay and fullscreen toggles, runs the
+//! particle intro, and renders on demand.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,10 +10,11 @@ use glam::{Vec2, Vec3};
 use web_time::Instant;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
+use winit::event::StartCause;
 use winit::event::{
     ElementState, KeyEvent, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
 };
-use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{CursorIcon, Window, WindowId};
 
@@ -24,6 +25,7 @@ use crate::intro::{self, Intro};
 use crate::particles;
 use crate::renderer::Renderer;
 use crate::scene::{Action, Lens, Metrics, Scene};
+use crate::stats::{self, Stats};
 use crate::timeline::Timeline;
 use crate::ui::{self, Button, Insets, Panel, UiLayer};
 
@@ -54,6 +56,8 @@ pub struct Options {
     pub station: Option<String>,
     /// Jump between stations instead of easing (prefers-reduced-motion).
     pub reduced_motion: bool,
+    /// Start with the performance overlay shown.
+    pub stats: bool,
 }
 
 pub struct App {
@@ -68,6 +72,14 @@ pub struct App {
     about_open: bool,
     source: u32,
     session: String,
+    /// The performance overlay: frame statistics while it's shown, its text,
+    /// the About panel's switch for it, whether the GPU can time its passes,
+    /// and whether the last frame animated (or the app idles).
+    stats: Option<Stats>,
+    overlay: Vec<String>,
+    overlay_switch: u32,
+    gpu_timing: bool,
+    animating: bool,
     window: Option<Arc<Window>>,
     state: Option<State>,
     last_frame: Instant,
@@ -154,6 +166,7 @@ impl App {
         let mut scene = Scene::new(&resume);
         let buttons = ui::native_buttons(&mut scene);
         let source = ui::source_link(&mut scene);
+        let overlay_switch = ui::overlay_switch(&mut scene);
         let start = options
             .station
             .as_deref()
@@ -170,6 +183,11 @@ impl App {
             about_open: false,
             source,
             session: String::new(),
+            stats: options.stats.then(Stats::default),
+            overlay: Vec::new(),
+            overlay_switch,
+            gpu_timing: false,
+            animating: false,
             window: None,
             state: None,
             last_frame: Instant::now(),
@@ -215,6 +233,13 @@ impl App {
 
     fn redraw(&mut self) {
         let now = Instant::now();
+        if self
+            .stats
+            .as_mut()
+            .is_some_and(|stats| stats.refresh_due(now))
+        {
+            self.refresh_overlay(now);
+        }
         let dt = (now - self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
         let moving = self.timeline.update(dt);
@@ -242,14 +267,35 @@ impl App {
         renderer.set_title_opacity(&gpu.context, title_opacity);
         let camera = self.scene.camera(position, lens);
         let projection = UiLayer::projection(gpu.config.width as f32, gpu.config.height as f32);
-        let presented = gpu.render(|ctx, view| renderer.draw(ctx, view, &camera, projection));
+        // CPU time: updating and encoding, not waiting for the surface.
+        let prepared = now.elapsed();
+        let mut encoded = Duration::ZERO;
+        let rendering = Instant::now();
+        let presented = gpu.render(|ctx, view| {
+            let start = Instant::now();
+            renderer.draw(ctx, view, &camera, projection);
+            encoded = start.elapsed();
+        });
+        // The rest of it: getting the surface texture and presenting it.
+        let waited = rendering.elapsed().saturating_sub(encoded);
         if presented {
             self.presented += 1;
             if self.presented.is_power_of_two() {
                 let (frames, seconds) = (self.presented, self.started.elapsed().as_secs_f32());
                 log::info!("{frames} frames presented after {seconds:.1} s");
             }
+            if let Some(stats) = &mut self.stats {
+                let ms = |time: Duration| time.as_secs_f32() * 1000.0;
+                // `animating` is still the previous frame's: did it ask for this one?
+                stats.frame(now, ms(prepared + encoded), ms(waited), self.animating);
+            }
         }
+        if let Some(stats) = &mut self.stats
+            && let Some(times) = renderer.gpu_times(&gpu.context)
+        {
+            stats.gpu(times);
+        }
+        self.animating = moving || intro_active;
         // Keep redrawing while the timeline or the particles move, and retry
         // a frame the surface skipped (e.g. right after the first
         // `configure()`) so a skipped frame is never the last one drawn.
@@ -295,11 +341,8 @@ impl App {
     /// Keyboard focus targets: the open About panel's link, the links of
     /// the station in view, then the screen-space buttons.
     fn targets(&self) -> Vec<u32> {
-        let panel = if self.about_open {
-            std::slice::from_ref(&self.source)
-        } else {
-            &[]
-        };
+        let links = [self.source, self.overlay_switch];
+        let panel = if self.about_open { &links[..] } else { &[] };
         focus::targets(&self.scene, self.station, panel, &self.buttons)
     }
 
@@ -418,9 +461,53 @@ impl App {
         let panel = self.about_open.then(|| Panel {
             session: &self.session,
             source: self.source,
+            overlay: self.overlay_switch,
+            overlay_shown: self.stats.is_some(),
         });
-        state.ui = UiLayer::new(size, scale, insets, &self.buttons, panel.as_ref());
+        let overlay = (!self.overlay.is_empty()).then_some(self.overlay.as_slice());
+        state.ui = UiLayer::new(size, scale, insets, &self.buttons, panel.as_ref(), overlay);
         state.renderer.set_ui(&state.gpu.context, &state.ui);
+    }
+
+    /// Recomputes the performance overlay's text (twice a second while it's
+    /// shown, or empty) and the screen-space layer showing it.
+    fn refresh_overlay(&mut self, now: Instant) {
+        self.overlay = match (&self.stats, &self.state) {
+            (Some(stats), Some(state)) => {
+                let config = &state.gpu.config;
+                let images = u64::from(config.desired_maximum_frame_latency) + 1;
+                let info = stats::Info {
+                    animating: self.animating,
+                    gpu_timing: self.gpu_timing,
+                    counts: state.renderer.counts(),
+                    gpu_bytes: state.renderer.gpu_bytes(),
+                    surface_bytes: u64::from(config.width) * u64::from(config.height) * 4 * images,
+                    size: [config.width, config.height],
+                    session: &self.session,
+                };
+                stats::lines(&stats.summary(now), &info)
+            }
+            _ => Vec::new(),
+        };
+        self.update_ui();
+    }
+
+    /// P or the About panel's switch: shows or hides the performance
+    /// overlay (and times the GPU while it's shown).
+    fn toggle_stats(&mut self) {
+        let show = self.stats.is_none();
+        self.stats = show.then(Stats::default);
+        if let Some(state) = &mut self.state {
+            self.gpu_timing = state.renderer.set_timing(&state.gpu.context, show);
+        }
+        self.refresh_overlay(Instant::now());
+        announce(if show {
+            "Performance overlay shown"
+        } else {
+            "Performance overlay hidden"
+        });
+        self.update_hover();
+        self.request_redraw();
     }
 
     /// Rebuilds the scene when the screen's shape calls for the other layout
@@ -435,6 +522,7 @@ impl App {
         let mut scene = Scene::with_metrics(&crate::content::resume(), metrics);
         self.buttons = ui::native_buttons(&mut scene);
         self.source = ui::source_link(&mut scene);
+        self.overlay_switch = ui::overlay_switch(&mut scene);
         self.scene = scene;
         (self.hovered, self.pressed, self.focused, self.pinned) = (None, None, None, None);
         // Swapping a running scene restarts the particles from their cloud:
@@ -501,6 +589,7 @@ impl App {
             }
             Some(Action::ToggleSkills) => self.toggle_skills(),
             Some(Action::ToggleAbout) => self.toggle_about(),
+            Some(Action::ToggleStats) => self.toggle_stats(),
             None => {}
         }
     }
@@ -630,6 +719,8 @@ impl App {
                     self.toggle_skills();
                 } else if c.eq_ignore_ascii_case("i") {
                     self.toggle_about();
+                } else if c.eq_ignore_ascii_case("p") {
+                    self.toggle_stats();
                 }
                 return;
             }
@@ -712,16 +803,28 @@ impl ApplicationHandler<AppEvent> for App {
         wasm_bindgen_futures::spawn_local(init);
     }
 
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
+        // The performance overlay's refresh, due while nothing else redraws.
+        if matches!(cause, StartCause::ResumeTimeReached { .. }) {
+            self.request_redraw();
+        }
+    }
+
     /// Requests the next frame of an animation. Not from within the frame
     /// itself: on iOS, winit redraws via `setNeedsDisplay`, which UIKit
     /// ignores while it's drawing, so the animation would stop after one
-    /// frame.
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    /// frame. With the performance overlay shown, it also wakes up for the
+    /// overlay's next refresh.
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if std::mem::take(&mut self.redraw_after)
             && let Some(window) = &self.window
         {
             window.request_redraw();
         }
+        event_loop.set_control_flow(match &self.stats {
+            Some(stats) => ControlFlow::WaitUntil(stats.next_refresh(Instant::now())),
+            None => ControlFlow::Wait,
+        });
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
@@ -741,12 +844,16 @@ impl ApplicationHandler<AppEvent> for App {
                 }
                 self.fit_layout(gpu.aspect());
                 let renderer = Renderer::new(&gpu.context, &self.scene, self.intro.is_some());
-                self.state = Some(State {
+                let mut state = State {
                     lens: self.scene.lens(gpu.aspect()),
                     ui: UiLayer::default(),
                     gpu: *gpu,
                     renderer,
-                });
+                };
+                if self.stats.is_some() {
+                    self.gpu_timing = state.renderer.set_timing(&state.gpu.context, true);
+                }
+                self.state = Some(state);
                 self.layout();
                 self.last_frame = Instant::now();
                 self.request_redraw();
@@ -874,13 +981,14 @@ fn safe_insets(window: &Window) -> Insets {
         return Insets::default();
     };
     let (safe_size, size) = (window.inner_size(), window.outer_size());
-    let top = safe.y - screen.y;
-    let right = size.width as i32 - (safe.x - screen.x) - safe_size.width as i32;
+    let (left, top) = (safe.x - screen.x, safe.y - screen.y);
+    let right = size.width as i32 - left - safe_size.width as i32;
     let bottom = size.height as i32 - top - safe_size.height as i32;
     Insets {
         top: top.max(0) as f32,
         right: right.max(0) as f32,
         bottom: bottom.max(0) as f32,
+        left: left.max(0) as f32,
     }
 }
 

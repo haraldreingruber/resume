@@ -238,7 +238,13 @@ impl Particles {
     }
 
     /// Runs one frame of simulation.
-    pub fn step(&mut self, ctx: &Context, step: &Step) {
+    /// `timestamps`: GPU timing for the performance overlay.
+    pub fn step(
+        &mut self,
+        ctx: &Context,
+        step: &Step,
+        timestamps: Option<wgpu::ComputePassTimestampWrites<'_>>,
+    ) {
         let (pointer, radius) = step
             .pointer
             .map_or((Vec3::ZERO, 0.0), |p| (p, POINTER_RADIUS));
@@ -251,13 +257,26 @@ impl Particles {
             .write_buffer(&self.sim, 0, bytemuck::bytes_of(&sim));
         let mut encoder = ctx.device.create_command_encoder(&Default::default());
         {
-            let mut pass = encoder.begin_compute_pass(&Default::default());
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("particles"),
+                timestamp_writes: timestamps,
+            });
             pass.set_pipeline(&self.simulate);
             pass.set_bind_group(0, &self.simulate_group, &[]);
             pass.dispatch_workgroups(self.count.div_ceil(WORKGROUP), 1, 1);
         }
         ctx.queue.submit([encoder.finish()]);
         self.visible = step.scatter < 1.0;
+    }
+
+    /// How many it draws (none once fully scattered).
+    pub fn drawn(&self) -> u32 {
+        if self.visible { self.count } else { 0 }
+    }
+
+    /// The GPU memory its buffers take.
+    pub fn bytes(&self) -> u64 {
+        self.particles.size() + self.sim.size()
     }
 
     /// Draws the particles; expects the world layer's bind group at group 0.

@@ -14,6 +14,7 @@ use crate::gpu::Context;
 use crate::intro::{self, Intro};
 use crate::renderer::Renderer;
 use crate::scene::{Metrics, Scene};
+use crate::stats::{self, Stats};
 use crate::ui::{self, Insets, Panel, UiLayer};
 
 /// The native window's default (logical) size.
@@ -45,6 +46,8 @@ pub struct Request {
     pub focus: Option<usize>,
     /// Shows the About panel.
     pub about: bool,
+    /// Shows the performance overlay (with the headless GPU's timings).
+    pub stats: bool,
 }
 
 /// One image: where on the timeline, until when the particles run (`None`:
@@ -152,12 +155,15 @@ pub fn run(request: &Request) -> Result<(), String> {
     let mut scene = Scene::with_metrics(&resume, Metrics::for_aspect(aspect));
     let buttons = ui::native_buttons(&mut scene);
     let source = ui::source_link(&mut scene);
+    let overlay_switch = ui::overlay_switch(&mut scene);
     let frames = frames(&scene, request)?;
 
     let ctx = pollster::block_on(context())?;
     let mut renderer = Renderer::new(&ctx, &scene, ctx.compute);
     let mut intro = Intro::new(false);
     let session = about::session(&ctx.adapter);
+    let gpu_timing = renderer.set_timing(&ctx, request.stats);
+    let mut stats = Stats::default();
     let lens = scene.lens(aspect);
     let projection = UiLayer::projection(width as f32, height as f32);
     let target = ctx.device.create_texture(&wgpu::TextureDescriptor {
@@ -180,9 +186,41 @@ pub fn run(request: &Request) -> Result<(), String> {
     for frame in frames {
         simulate(&mut renderer, &ctx, &mut intro, frame.position, frame.until);
         let station = frame.position.round() as usize;
+        let camera = scene.camera(frame.position, &lens);
+        if request.stats {
+            // A frame to measure first, so the overlay has numbers.
+            let start = web_time::Instant::now();
+            renderer.draw(&ctx, &view, &camera, projection);
+            let cpu = start.elapsed();
+            // Waits for the GPU, so its timestamps are ready.
+            read_back(&ctx, &target)?;
+            stats.frame(
+                web_time::Instant::now(),
+                cpu.as_secs_f32() * 1000.0,
+                0.0,
+                false,
+            );
+            if let Some(times) = renderer.gpu_times(&ctx) {
+                stats.gpu(times);
+            }
+        }
+        let overlay = request.stats.then(|| {
+            let info = stats::Info {
+                animating: false,
+                gpu_timing,
+                counts: renderer.counts(),
+                gpu_bytes: renderer.gpu_bytes(),
+                surface_bytes: u64::from(width) * u64::from(height) * 4,
+                size: [width, height],
+                session: &session,
+            };
+            stats::lines(&stats.summary(web_time::Instant::now()), &info)
+        });
         let panel = frame.about.then(|| Panel {
             session: &session,
             source,
+            overlay: overlay_switch,
+            overlay_shown: request.stats,
         });
         let size = [width as f32, height as f32];
         let ui = UiLayer::new(
@@ -191,13 +229,14 @@ pub fn run(request: &Request) -> Result<(), String> {
             Insets::default(),
             &buttons,
             panel.as_ref(),
+            overlay.as_deref(),
         );
         renderer.set_ui(&ctx, &ui);
-        let panel_links: &[u32] = if frame.about { &[source] } else { &[] };
+        let links = [source, overlay_switch];
+        let panel_links = if frame.about { &links[..] } else { &[] };
         let targets = focus::targets(&scene, station, panel_links, &buttons);
         let focused = frame.focus.and_then(|n| targets.get(n).copied());
         renderer.set_groups(&ctx, None, focused, scene.relations(focused));
-        let camera = scene.camera(frame.position, &lens);
         renderer.draw(&ctx, &view, &camera, projection);
         let rgba = read_back(&ctx, &target)?;
         let path = request.dir.join(format!("{}.png", frame.name));
