@@ -7,7 +7,7 @@
 
 use glam::Vec2;
 
-use crate::text::{self, Font, TextStyle};
+use crate::render::text::{self, Font, TextStyle};
 
 /// Label sizes (world units per em, before `Params::text_scale`).
 const ENTRY_SIZE: f32 = 0.062;

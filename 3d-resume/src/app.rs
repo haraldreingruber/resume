@@ -18,15 +18,15 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{CursorIcon, Window, WindowId};
 
-use crate::about;
-use crate::focus::{self, Step};
-use crate::gpu::Gpu;
-use crate::intro::{self, Intro};
-use crate::particles;
-use crate::renderer::Renderer;
+use crate::debug::stats::{self, GraphFrame, Stats};
+use crate::render::gpu::Gpu;
+use crate::render::particles;
+use crate::render::renderer::Renderer;
+use crate::scene::intro::{self, Intro};
+use crate::scene::timeline::Timeline;
 use crate::scene::{self, Action, Input, Lens, Metrics, Scene};
-use crate::stats::{self, GraphFrame, Stats};
-use crate::timeline::Timeline;
+use crate::ui::about;
+use crate::ui::focus::{self, Step};
 use crate::ui::{self, Button, Insets, Overlay, Panel, Switch, Switches, UiLayer};
 
 /// Timeline units per wheel line and per touch/trackpad pixel.
@@ -238,8 +238,8 @@ impl App {
         };
         #[cfg(target_arch = "wasm32")]
         {
-            crate::web::release_tab_at_edges(app.tab_leaves.clone());
-            crate::web::forward_nav_clicks(app.proxy.clone());
+            crate::platform::web::release_tab_at_edges(app.tab_leaves.clone());
+            crate::platform::web::forward_nav_clicks(app.proxy.clone());
         }
         app.publish_tab_leaves();
         app
@@ -353,7 +353,7 @@ impl App {
         if settled && Some(station) != self.shown_station {
             self.shown_station = Some(station);
             #[cfg(target_arch = "wasm32")]
-            crate::web::show_station(
+            crate::platform::web::show_station(
                 Some(station)
                     .filter(|&s| s > 0)
                     .and_then(|s| self.scene.station_id(s)),
@@ -703,7 +703,7 @@ impl App {
 
     fn activate(&mut self, group: u32) {
         match self.scene.action(group).cloned() {
-            Some(Action::Open(link)) => crate::links::open(&link),
+            Some(Action::Open(link)) => crate::platform::links::open(&link),
             Some(Action::GoToStation(station)) => {
                 self.timeline.go_to(station);
                 self.request_redraw();
@@ -751,7 +751,7 @@ impl App {
             self.publish_tab_leaves();
         }
         #[cfg(target_arch = "wasm32")]
-        crate::web::show_about_expanded(open);
+        crate::platform::web::show_about_expanded(open);
         if open {
             announce(&about::announcement(&self.session));
         }
@@ -789,7 +789,7 @@ impl App {
     /// current monitor.
     fn toggle_fullscreen(&self) {
         #[cfg(target_arch = "wasm32")]
-        crate::web::toggle_fullscreen();
+        crate::platform::web::toggle_fullscreen();
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(window) = &self.window {
             window.set_fullscreen(match window.fullscreen() {
@@ -1002,7 +1002,7 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::GpuReady(Err(error)) => {
                 log::error!("WebGPU initialization failed: {error}");
                 #[cfg(target_arch = "wasm32")]
-                crate::web::show_plain_version();
+                crate::platform::web::show_plain_version();
                 event_loop.exit();
             }
         }
@@ -1078,7 +1078,7 @@ impl ApplicationHandler<AppEvent> for App {
 /// no screen-reader bridge yet.
 fn announce(text: &str) {
     #[cfg(target_arch = "wasm32")]
-    crate::web::announce(text);
+    crate::platform::web::announce(text);
     #[cfg(not(target_arch = "wasm32"))]
     let _ = text;
 }
@@ -1087,7 +1087,7 @@ fn announce(text: &str) {
 fn window_attributes(title: &str) -> winit::window::WindowAttributes {
     let attributes = Window::default_attributes()
         .with_title(title)
-        .with_window_icon(crate::icon::window_icon());
+        .with_window_icon(crate::platform::icon::window_icon());
     // Phones: the whole screen (iOS would otherwise make the view this size).
     if cfg!(any(target_os = "android", target_os = "ios")) {
         attributes
@@ -1101,7 +1101,7 @@ fn window_attributes(title: &str) -> winit::window::WindowAttributes {
 #[cfg(target_arch = "wasm32")]
 fn safe_insets(_window: &Window) -> Insets {
     Insets {
-        bottom: crate::web::nav_height(),
+        bottom: crate::platform::web::nav_height(),
         ..Insets::default()
     }
 }
@@ -1134,7 +1134,7 @@ fn window_attributes(title: &str) -> winit::window::WindowAttributes {
     use winit::platform::web::WindowAttributesExtWebSys;
     Window::default_attributes()
         .with_title(title)
-        .with_canvas(crate::web::canvas())
+        .with_canvas(crate::platform::web::canvas())
 }
 
 #[cfg(test)]

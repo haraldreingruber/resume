@@ -10,18 +10,18 @@ use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 use wgpu::util::DeviceExt;
 
-use crate::bloom::{self, Bloom};
-use crate::gpu::Context;
-use crate::gpu_timer::{GpuTimer, Pass};
-use crate::intro::Step;
-use crate::lines::LineInstance;
-use crate::particles::Particles;
+use crate::debug::gpu_timer::{GpuTimer, Pass};
+use crate::debug::stats::{DrawCounts, GpuTimes};
+use crate::render::bloom::{self, Bloom};
+use crate::render::gpu::Context;
+use crate::render::lines::LineInstance;
+use crate::render::particles::Particles;
+use crate::render::shapes::ShapeInstance;
+use crate::render::text::{self, GlyphInstance};
+use crate::scene::intro::Step;
 use crate::scene::{
     Camera, FAR_FADE, MAP_DIM, MAX_GROUPS, NEAR_FADE, Relations, Scene, TITLE_GROUP,
 };
-use crate::shapes::ShapeInstance;
-use crate::stats::{DrawCounts, GpuTimes};
-use crate::text::{self, GlyphInstance};
 use crate::ui::UiLayer;
 
 /// Matches `Globals` in `shaders/text.wgsl` and `shaders/shapes.wgsl`.
@@ -322,11 +322,11 @@ impl Renderer {
             immediate_size: 0,
         });
         let shaders = Shaders {
-            text: device.create_shader_module(wgpu::include_wgsl!("../shaders/text.wgsl")),
-            shapes: device.create_shader_module(wgpu::include_wgsl!("../shaders/shapes.wgsl")),
-            lines: device.create_shader_module(wgpu::include_wgsl!("../shaders/lines.wgsl")),
+            text: device.create_shader_module(wgpu::include_wgsl!("../../shaders/text.wgsl")),
+            shapes: device.create_shader_module(wgpu::include_wgsl!("../../shaders/shapes.wgsl")),
+            lines: device.create_shader_module(wgpu::include_wgsl!("../../shaders/lines.wgsl")),
             background: device
-                .create_shader_module(wgpu::include_wgsl!("../shaders/background.wgsl")),
+                .create_shader_module(wgpu::include_wgsl!("../../shaders/background.wgsl")),
         };
         // With bloom, the scene renders in HDR and the screen-space layer
         // on top of the result, in the window's format.
@@ -699,16 +699,19 @@ mod tests {
         let shaders = [
             (
                 "background.wgsl",
-                include_str!("../shaders/background.wgsl"),
+                include_str!("../../shaders/background.wgsl"),
             ),
-            ("text.wgsl", include_str!("../shaders/text.wgsl")),
-            ("shapes.wgsl", include_str!("../shaders/shapes.wgsl")),
-            ("lines.wgsl", include_str!("../shaders/lines.wgsl")),
-            ("bloom.wgsl", include_str!("../shaders/bloom.wgsl")),
-            ("particles.wgsl", include_str!("../shaders/particles.wgsl")),
+            ("text.wgsl", include_str!("../../shaders/text.wgsl")),
+            ("shapes.wgsl", include_str!("../../shaders/shapes.wgsl")),
+            ("lines.wgsl", include_str!("../../shaders/lines.wgsl")),
+            ("bloom.wgsl", include_str!("../../shaders/bloom.wgsl")),
+            (
+                "particles.wgsl",
+                include_str!("../../shaders/particles.wgsl"),
+            ),
             (
                 "particles_sim.wgsl",
-                include_str!("../shaders/particles_sim.wgsl"),
+                include_str!("../../shaders/particles_sim.wgsl"),
             ),
         ];
         for (name, source) in shaders {

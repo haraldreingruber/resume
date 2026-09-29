@@ -57,7 +57,7 @@ impl Context {
             view_format,
             compute,
             adapter: info,
-            hdr: crate::bloom::supported(adapter),
+            hdr: crate::render::bloom::supported(adapter),
         })
     }
 }

@@ -4,15 +4,19 @@
 //! camera flies along a Catmull-Rom spline through them, so scrolling forward
 //! travels back in time.
 
+pub mod intro;
+pub mod skillmap;
+pub mod timeline;
+
 use std::ops::Range;
 
 use glam::{Mat4, Vec2, Vec3};
 use resume_model::{DateRange, Education, PartialDate, Project, Resume, RichText, Work};
 
-use crate::lines::{self, LineInstance};
-use crate::shapes::{FOCUS_RING, ShapeInstance};
-use crate::skillmap::{self, NodeKind};
-use crate::text::{self, Font, GlyphInstance, Run, TextStyle, rgb, rgb_bytes};
+use crate::render::lines::{self, LineInstance};
+use crate::render::shapes::{FOCUS_RING, ShapeInstance};
+use crate::render::text::{self, Font, GlyphInstance, Run, TextStyle, rgb, rgb_bytes};
+use skillmap::NodeKind;
 
 /// Distance between stations along -z.
 const SPACING: f32 = 6.0;
@@ -1259,7 +1263,7 @@ fn catmull_rom(points: &[Vec3], t: f32) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shapes::FOCUS_RING;
+    use crate::render::shapes::FOCUS_RING;
 
     #[test]
     fn spline_passes_through_points() {
