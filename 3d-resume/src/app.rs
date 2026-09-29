@@ -24,7 +24,7 @@ use crate::gpu::Gpu;
 use crate::intro::{self, Intro};
 use crate::particles;
 use crate::renderer::Renderer;
-use crate::scene::{Action, Lens, Metrics, Scene};
+use crate::scene::{self, Action, Input, Lens, Metrics, Scene};
 use crate::stats::{self, Stats};
 use crate::timeline::Timeline;
 use crate::ui::{self, Button, Insets, Panel, UiLayer};
@@ -58,6 +58,8 @@ pub struct Options {
     pub reduced_motion: bool,
     /// Start with the performance overlay shown.
     pub stats: bool,
+    /// A touch screen (phones, tablets): hints talk about taps, not keys.
+    pub touch: bool,
 }
 
 pub struct App {
@@ -77,6 +79,8 @@ pub struct App {
     /// and whether the last frame animated (or the app idles).
     stats: Option<Stats>,
     overlay: Vec<String>,
+    /// Keys and a mouse, or touch: what the hints talk about.
+    input: Input,
     overlay_switch: u32,
     gpu_timing: bool,
     animating: bool,
@@ -163,7 +167,12 @@ struct Touch {
 impl App {
     pub fn new(event_loop: &EventLoop<AppEvent>, options: Options) -> Self {
         let resume = crate::content::resume();
-        let mut scene = Scene::new(&resume);
+        let input = if options.touch {
+            Input::Touch
+        } else {
+            Input::Keyboard
+        };
+        let mut scene = Scene::build(&resume, scene::WIDE, input);
         let buttons = ui::native_buttons(&mut scene);
         let source = ui::source_link(&mut scene);
         let overlay_switch = ui::overlay_switch(&mut scene);
@@ -184,6 +193,7 @@ impl App {
             source,
             session: String::new(),
             stats: options.stats.then(Stats::default),
+            input,
             overlay: Vec::new(),
             overlay_switch,
             gpu_timing: false,
@@ -464,6 +474,7 @@ impl App {
             source: self.source,
             overlay: self.overlay_switch,
             overlay_shown: self.stats.is_some(),
+            keys: self.input == Input::Keyboard,
         });
         let overlay = (!self.overlay.is_empty()).then_some(self.overlay.as_slice());
         state.ui = UiLayer::new(size, scale, insets, &self.buttons, panel.as_ref(), overlay);
@@ -520,7 +531,7 @@ impl App {
         if metrics == self.scene.metrics() {
             return false;
         }
-        let mut scene = Scene::with_metrics(&crate::content::resume(), metrics);
+        let mut scene = Scene::build(&crate::content::resume(), metrics, self.input);
         self.buttons = ui::native_buttons(&mut scene);
         self.source = ui::source_link(&mut scene);
         self.overlay_switch = ui::overlay_switch(&mut scene);

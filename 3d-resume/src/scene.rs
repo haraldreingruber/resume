@@ -124,6 +124,8 @@ const BODY: [f32; 4] = rgb(0xC9D4DE);
 const MUTED: [f32; 4] = rgb(0x8AA0B4);
 const PATH: [f32; 4] = rgb(0x3E5A73);
 const CODE: [f32; 4] = rgb(0xE2C08D);
+/// Keycap outlines in the intro's hints.
+const KEYCAP: [f32; 4] = rgb(0x5E7A93);
 /// Station accents when an entry has no `x-color`, derived from the PDF blues.
 const PALETTE: [[f32; 4]; 4] = [rgb(0x6DB3E8), rgb(0x8CC4EF), rgb(0x6FC2C9), rgb(0x9AB6E8)];
 /// Skill group colors on the skill map.
@@ -323,13 +325,30 @@ fn timeline(resume: &Resume) -> Vec<Entry<'_>> {
     entries
 }
 
+/// How people move around, which the intro's hints talk about: keys and a
+/// mouse, or touch (phones and tablets).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Input {
+    #[default]
+    Keyboard,
+    Touch,
+}
+
 impl Scene {
-    /// The scene in the wide layout.
+    /// The scene in the wide layout, for keys (tests).
+    #[cfg(test)]
     pub fn new(resume: &Resume) -> Self {
         Self::with_metrics(resume, WIDE)
     }
 
+    /// The scene in a layout, for keys (tests).
+    #[cfg(test)]
     pub fn with_metrics(resume: &Resume, metrics: Metrics) -> Self {
+        Self::build(resume, metrics, Input::Keyboard)
+    }
+
+    /// The scene in a layout, with hints for `input`.
+    pub fn build(resume: &Resume, metrics: Metrics, input: Input) -> Self {
         let entries = timeline(resume);
         // Intro, entries, skill map, outro.
         let count = entries.len() + 3;
@@ -358,6 +377,7 @@ impl Scene {
         let mut blocks = Vec::with_capacity(count);
         let mut builder = Builder {
             m: metrics,
+            input,
             ..Builder::default()
         };
         blocks.push(builder.take(|b| b.intro(resume, stations[0].anchor)));
@@ -608,6 +628,7 @@ fn sentences<S: AsRef<str>>(parts: impl IntoIterator<Item = S>) -> String {
 #[derive(Default)]
 struct Builder {
     m: Metrics,
+    input: Input,
     glyphs: Vec<GlyphInstance>,
     shapes: Vec<ShapeInstance>,
     lines: Vec<LineInstance>,
@@ -675,6 +696,7 @@ impl Builder {
                     },
                     color,
                     group,
+                    key: false,
                 }
             })
             .collect();
@@ -693,6 +715,7 @@ impl Builder {
             font: style.font,
             color: style.color,
             group,
+            key: false,
         };
         let paragraph = text::layout_runs(&[run], style, *cursor, &mut self.glyphs);
         for (group, rect) in paragraph.boxes {
@@ -830,24 +853,47 @@ impl Builder {
             .style(Font::Regular, 0.07, MUTED)
             .centered()
             .wrap(self.m.tagline_width);
-        self.text(
-            "Scroll, swipe or use the arrow keys to travel back in time",
-            hint,
-            0.05,
-            &mut cursor,
-        );
-        self.text(
-            "Press S for the skill map, I for how it's built",
-            hint,
-            0.05,
-            &mut cursor,
-        );
-        self.text(
-            "F or a double-click toggles fullscreen",
-            hint,
-            0.0,
-            &mut cursor,
-        );
+        let hints: &[&str] = match self.input {
+            Input::Keyboard => &[
+                "Scroll, swipe or use the arrow keys to travel back in time",
+                "Press [S] for the skill map, [I] for how it's built",
+                "[F] or a double-click toggles fullscreen",
+            ],
+            // The buttons: "Skills" and a round "i".
+            Input::Touch => &[
+                "Swipe to travel back in time",
+                "Tap Skills for the skill map, [i] for how it's built",
+            ],
+        };
+        for (i, line) in hints.iter().enumerate() {
+            let gap = if i + 1 < hints.len() { 0.05 } else { 0.0 };
+            self.keys_text(line, hint, gap, &mut cursor);
+        }
+    }
+
+    /// Text with keys marked like `Press [S]`: each key's letter in bold,
+    /// in a keycap outline.
+    fn keys_text(&mut self, text: &str, style: TextStyle, gap: f32, cursor: &mut Vec3) {
+        let parts = text::key_parts(text);
+        let runs: Vec<Run> = parts
+            .iter()
+            .map(|(part, key)| Run {
+                text: part,
+                font: if *key { Font::Bold } else { style.font },
+                color: if *key { BODY } else { style.color },
+                group: 0,
+                key: *key,
+            })
+            .collect();
+        let paragraph = text::layout_runs(&runs, style, *cursor, &mut self.glyphs);
+        for key in paragraph.keys {
+            let rect = text::keycap(key, style.size);
+            let (radius, border) = (style.size * 0.22, style.size * 0.06);
+            self.shapes.push(ShapeInstance::outlined(
+                rect, cursor.z, radius, border, KEYCAP,
+            ));
+        }
+        cursor.y -= paragraph.height + gap;
     }
 
     fn job(&mut self, work: &Work, anchor: Vec3, accent: [f32; 4]) {

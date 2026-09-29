@@ -152,6 +152,8 @@ pub struct Run<'a> {
     pub color: [f32; 4],
     /// Hover group; runs with a non-zero group get their boxes reported.
     pub group: u32,
+    /// A key (e.g. from `key_parts`): its box is reported as a keycap.
+    pub key: bool,
 }
 
 /// Result of laying out a paragraph.
@@ -161,6 +163,46 @@ pub struct Paragraph {
     /// Per line, the box `[x0, y0, x1, y1]` of each run with a non-zero group,
     /// e.g. for link underlines and hit regions.
     pub boxes: Vec<(u32, [f32; 4])>,
+    /// The box of each key run, for its keycap outline.
+    pub keys: Vec<[f32; 4]>,
+}
+
+/// Room on either side of a key's letter for its keycap outline: a space
+/// that doesn't break lines.
+const KEY_PAD: char = '\u{a0}';
+
+/// Splits `text` with keys marked like `Press [S] for…` into plain parts
+/// and keys (`true`), each key's letters padded for its keycap.
+pub fn key_parts(text: &str) -> Vec<(String, bool)> {
+    let mut parts = Vec::new();
+    let mut rest = text;
+    while let Some((before, after)) = rest.split_once('[')
+        && let Some((key, tail)) = after.split_once(']')
+    {
+        if !before.is_empty() {
+            parts.push((before.to_owned(), false));
+        }
+        parts.push((format!("{KEY_PAD}{key}{KEY_PAD}"), true));
+        rest = tail;
+    }
+    if !rest.is_empty() {
+        parts.push((rest.to_owned(), false));
+    }
+    parts
+}
+
+/// Where a keycap outline goes for a key run's `box` (from
+/// `Paragraph::keys`) in text of `size`: around the letter, inside the
+/// padding, and about square even for a narrow letter like I.
+pub fn keycap([x0, y0, x1, y1]: [f32; 4], size: f32) -> [f32; 4] {
+    let half_width = ((x1 - x0) / 2.0 - 0.06 * size).max(0.4 * size);
+    let center = (x0 + x1) / 2.0;
+    [
+        center - half_width,
+        y0 + 0.05 * size,
+        center + half_width,
+        y1 - 0.12 * size,
+    ]
 }
 
 fn advance(font: Font, ch: char) -> f32 {
@@ -249,6 +291,7 @@ pub fn layout(text: &str, style: TextStyle, top_left: Vec3, out: &mut Vec<GlyphI
         font: style.font,
         color: style.color,
         group: style.group,
+        key: false,
     };
     layout_runs(&[run], style, top_left, out).height
 }
@@ -278,6 +321,7 @@ pub fn layout_runs(
     let mut baseline = top_left.y - m.ascender * size;
     let lines = wrap(&chars, size, style.max_width);
     let mut boxes = Vec::new();
+    let mut keys = Vec::new();
     for line in &lines {
         let line_chars = &chars[line.clone()];
         let mut pen = match style.align {
@@ -287,20 +331,29 @@ pub fn layout_runs(
         };
         // Box of the run currently being extended: (run, x0).
         let mut open_box: Option<(usize, f32)> = None;
-        let close_box = |run: usize, x0: f32, x1: f32, boxes: &mut Vec<(u32, [f32; 4])>| {
+        let close_box = |run: usize,
+                         x0: f32,
+                         x1: f32,
+                         boxes: &mut Vec<(u32, [f32; 4])>,
+                         keys: &mut Vec<[f32; 4]>| {
             let bottom = baseline + m.descender * size;
             let top = baseline + m.ascender * size;
-            boxes.push((runs[run].group, [x0, bottom, x1, top]));
+            let rect = [x0, bottom, x1, top];
+            if runs[run].key {
+                keys.push(rect);
+            } else {
+                boxes.push((runs[run].group, rect));
+            }
         };
         for c in line_chars {
             let run = &runs[c.run];
             if let Some((r, x0)) = open_box
                 && r != c.run
             {
-                close_box(r, x0, pen, &mut boxes);
+                close_box(r, x0, pen, &mut boxes, &mut keys);
                 open_box = None;
             }
-            if run.group != 0 && open_box.is_none() {
+            if (run.group != 0 || run.key) && open_box.is_none() {
                 open_box = Some((c.run, pen));
             }
             let Some(g) = glyph(c.font, c.ch) else {
@@ -324,13 +377,14 @@ pub fn layout_runs(
             pen += g.advance * size;
         }
         if let Some((r, x0)) = open_box {
-            close_box(r, x0, pen, &mut boxes);
+            close_box(r, x0, pen, &mut boxes, &mut keys);
         }
         baseline -= line_advance;
     }
     Paragraph {
         height: block_height(lines.len(), style),
         boxes,
+        keys,
     }
 }
 
@@ -441,6 +495,46 @@ mod tests {
     }
 
     #[test]
+    fn splits_marked_keys_and_reports_their_boxes() {
+        let parts = key_parts("Press [S] for the map, [I] too");
+        let texts: Vec<(&str, bool)> = parts.iter().map(|(t, k)| (t.as_str(), *k)).collect();
+        assert_eq!(
+            texts,
+            [
+                ("Press ", false),
+                ("\u{a0}S\u{a0}", true),
+                (" for the map, ", false),
+                ("\u{a0}I\u{a0}", true),
+                (" too", false),
+            ]
+        );
+        assert_eq!(key_parts("no keys"), [("no keys".to_owned(), false)]);
+        let white = [1.0; 4];
+        let runs: Vec<Run> = parts
+            .iter()
+            .map(|(text, key)| Run {
+                text,
+                font: Font::Regular,
+                color: white,
+                group: 0,
+                key: *key,
+            })
+            .collect();
+        let mut out = Vec::new();
+        let style = TextStyle::new(Font::Regular, 1.0, white);
+        let paragraph = layout_runs(&runs, style, Vec3::ZERO, &mut out);
+        assert_eq!(paragraph.keys.len(), 2);
+        assert!(paragraph.boxes.is_empty());
+        // The keycap sits inside the key's padding, clear of its neighbors.
+        let [x0, _, x1, _] = keycap(paragraph.keys[0], 1.0);
+        let letter = out
+            .iter()
+            .find(|g| g.rect[0] > paragraph.keys[0][0] && g.rect[2] < paragraph.keys[0][2])
+            .expect("the key's letter");
+        assert!(x0 < letter.rect[0] && letter.rect[2] < x1);
+    }
+
+    #[test]
     fn reports_boxes_of_grouped_runs_per_line() {
         let white = [1.0; 4];
         let runs = [
@@ -449,18 +543,21 @@ mod tests {
                 font: Font::Regular,
                 color: white,
                 group: 0,
+                key: false,
             },
             Run {
                 text: "my site",
                 font: Font::Bold,
                 color: white,
                 group: 7,
+                key: false,
             },
             Run {
                 text: " now",
                 font: Font::Regular,
                 color: white,
                 group: 0,
+                key: false,
             },
         ];
         let mut out = Vec::new();
