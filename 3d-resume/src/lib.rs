@@ -126,7 +126,8 @@ fn options() -> app::Options {
 }
 
 /// `--screenshots <dir> [--station <id|index> | --position <t>] [--time <s>]
-/// [--size 1280x800] [--scale <n>] [--focus <n>] [--about] [--stats] [--touch]`:
+/// [--size 1280x800] [--scale <n>] [--focus <n>] [--about] [--stats] [--touch]
+/// [--xray]`:
 /// renders the stations, two frames of the particle intro and the About
 /// panel (or one frame) headlessly to PNG files and exits. `--stats` adds
 /// the performance overlay.
@@ -148,6 +149,7 @@ fn screenshots(dir: String) -> Result<(), String> {
         about: std::env::args().any(|a| a == "--about"),
         stats: std::env::args().any(|a| a == "--stats"),
         touch: std::env::args().any(|a| a == "--touch"),
+        xray: std::env::args().any(|a| a == "--xray"),
     })
 }
 

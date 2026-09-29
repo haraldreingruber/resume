@@ -15,7 +15,7 @@ use crate::intro::{self, Intro};
 use crate::renderer::Renderer;
 use crate::scene::{Input, Metrics, Scene};
 use crate::stats::{self, Stats};
-use crate::ui::{self, Insets, Panel, UiLayer};
+use crate::ui::{self, Insets, Overlay, Panel, Switch, UiLayer};
 
 /// The native window's default (logical) size.
 pub const DEFAULT_SIZE: [u32; 2] = [1280, 800];
@@ -50,6 +50,8 @@ pub struct Request {
     pub stats: bool,
     /// Hints for a touch screen instead of keys (phones).
     pub touch: bool,
+    /// Shows the x-ray view (outlines of every glyph, shape and click area).
+    pub xray: bool,
 }
 
 /// One image: where on the timeline, until when the particles run (`None`:
@@ -163,6 +165,8 @@ pub fn run(request: &Request) -> Result<(), String> {
     let buttons = ui::native_buttons(&mut scene);
     let source = ui::source_link(&mut scene);
     let overlay_switch = ui::overlay_switch(&mut scene);
+    let shaders = ui::shader_links(&mut scene);
+    let switch_groups = ui::overlay_switches(&mut scene);
     let frames = frames(&scene, request)?;
 
     let ctx = pollster::block_on(context())?;
@@ -171,6 +175,26 @@ pub fn run(request: &Request) -> Result<(), String> {
     let session = about::session(&ctx.adapter);
     let gpu_timing = renderer.set_timing(&ctx, request.stats);
     let mut stats = Stats::default();
+    if request.xray {
+        renderer.set_xray(&ctx, &scene.xray());
+    }
+    let mut switches = Vec::new();
+    if request.stats {
+        if renderer.has_bloom() {
+            switches.push(Switch {
+                label: "Bloom",
+                key: "[B]",
+                on: true,
+                group: switch_groups.bloom,
+            });
+        }
+        switches.push(Switch {
+            label: "X-ray",
+            key: "[X]",
+            on: request.xray,
+            group: switch_groups.xray,
+        });
+    }
     let lens = scene.lens(aspect);
     let projection = UiLayer::projection(width as f32, height as f32);
     let target = ctx.device.create_texture(&wgpu::TextureDescriptor {
@@ -211,7 +235,7 @@ pub fn run(request: &Request) -> Result<(), String> {
                 stats.gpu(times);
             }
         }
-        let overlay = request.stats.then(|| {
+        let lines = request.stats.then(|| {
             let info = stats::Info {
                 animating: false,
                 gpu_timing,
@@ -223,8 +247,17 @@ pub fn run(request: &Request) -> Result<(), String> {
             };
             stats::lines(&stats.summary(web_time::Instant::now()), &info)
         });
+        let now = web_time::Instant::now();
+        let graph = stats.graph(now);
+        let overlay = lines.as_ref().map(|lines| Overlay {
+            lines,
+            graph: &graph,
+            switches: &switches,
+            keys: !request.touch,
+        });
         let panel = frame.about.then(|| Panel {
             session: &session,
+            shaders: &shaders,
             source,
             overlay: overlay_switch,
             overlay_shown: request.stats,
@@ -237,12 +270,15 @@ pub fn run(request: &Request) -> Result<(), String> {
             Insets::default(),
             &buttons,
             panel.as_ref(),
-            overlay.as_deref(),
+            overlay.as_ref(),
         );
         renderer.set_ui(&ctx, &ui);
-        let links = [source, overlay_switch];
-        let panel_links = if frame.about { &links[..] } else { &[] };
-        let targets = focus::targets(&scene, station, panel_links, &buttons);
+        let mut panel_links: Vec<u32> = switches.iter().map(|switch| switch.group).collect();
+        if frame.about {
+            panel_links.extend(&shaders);
+            panel_links.extend([source, overlay_switch]);
+        }
+        let targets = focus::targets(&scene, station, &panel_links, &buttons);
         let focused = frame.focus.and_then(|n| targets.get(n).copied());
         renderer.set_groups(&ctx, None, focused, scene.relations(focused));
         renderer.draw(&ctx, &view, request.size, &camera, projection);

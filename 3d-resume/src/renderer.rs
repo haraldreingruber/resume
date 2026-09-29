@@ -208,6 +208,10 @@ pub struct Renderer {
     /// GPU timing for the performance overlay, while it's shown (and the
     /// GPU has timestamp queries).
     timer: Option<GpuTimer>,
+    /// Whether bloom adds its glow (switchable in the performance overlay).
+    glow: bool,
+    /// The x-ray view's outlines over the world (performance overlay).
+    xray: Instances,
 }
 
 /// What `groups` holds.
@@ -358,6 +362,8 @@ impl Renderer {
             particles,
             bind_layout: layout,
             timer: None,
+            glow: true,
+            xray: Instances(None),
         }
     }
 
@@ -459,6 +465,21 @@ impl Renderer {
     }
 
     /// Turns GPU timing on or off; returns whether the GPU can time.
+    /// Whether this GPU renders bloom at all.
+    pub fn has_bloom(&self) -> bool {
+        self.bloom.is_some()
+    }
+
+    /// Turns bloom's glow on or off.
+    pub fn set_glow(&mut self, on: bool) {
+        self.glow = on;
+    }
+
+    /// Shows the x-ray view's `outlines` over the world (none: hides it).
+    pub fn set_xray(&mut self, ctx: &Context, outlines: &[ShapeInstance]) {
+        self.xray = Instances::new(&ctx.device, "x-ray", outlines);
+    }
+
     pub fn set_timing(&mut self, ctx: &Context, on: bool) -> bool {
         self.timer = if on { GpuTimer::new(ctx) } else { None };
         self.timer.is_some()
@@ -475,7 +496,7 @@ impl Renderer {
         let sum = |count: fn(&Layer) -> u32| layers.iter().map(|l| count(l)).sum();
         DrawCounts {
             glyphs: sum(|l| l.glyphs.count()),
-            shapes: sum(|l| l.shapes.count()),
+            shapes: sum(|l| l.shapes.count()) + self.xray.count(),
             lines: sum(|l| l.lines.count()),
             particles: self.particles.as_ref().map_or(0, Particles::drawn),
         }
@@ -496,6 +517,7 @@ impl Renderer {
             + self.particles.as_ref().map_or(0, Particles::bytes)
             + self.timer.as_ref().map_or(0, GpuTimer::bytes)
             + self.bloom.as_ref().map_or(0, Bloom::bytes)
+            + self.xray.bytes()
     }
 
     /// Draws a frame into `target` (a `size` view in `ctx.view_format`).
@@ -547,12 +569,17 @@ impl Renderer {
             pass.set_pipeline(&pipelines.background);
             pass.draw(0..3, 0..1);
             pipelines.draw_layer(&mut pass, &self.world, self.particles.as_ref());
+            if self.xray.count() > 0 {
+                pass.set_bind_group(0, &self.world.bind_group, &[]);
+                pass.set_pipeline(&pipelines.shapes);
+                self.xray.draw(&mut pass);
+            }
             if self.bloom.is_none() {
                 pipelines.draw_layer(&mut pass, &self.ui, None);
             }
         }
         if let (Some(bloom), Some(pipelines)) = (&self.bloom, &self.ui_pipelines) {
-            bloom.apply(&mut encoder, target, self.timer.as_mut());
+            bloom.apply(&mut encoder, target, self.timer.as_mut(), self.glow);
             let mut pass = begin_pass(&mut encoder, "ui", target, wgpu::LoadOp::Load, None);
             pipelines.draw_layer(&mut pass, &self.ui, None);
         }

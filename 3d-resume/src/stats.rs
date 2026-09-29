@@ -1,6 +1,6 @@
 //! The performance overlay (P, or the About panel's toggle): frame rate,
 //! frame, CPU and GPU times, whether the app is animating or idle, what it
-//! draws, its memory, and the display.
+//! draws, its memory, the display, and a graph of recent frame times.
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -12,6 +12,8 @@ use web_time::Instant;
 pub const REFRESH: Duration = Duration::from_millis(500);
 /// The frame rate and averages cover this long.
 const WINDOW: Duration = Duration::from_secs(1);
+/// The frame-time graph covers this long.
+pub const HISTORY: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy)]
 struct Frame {
@@ -31,6 +33,14 @@ pub struct GpuTimes {
     pub particles_ms: Option<f32>,
     /// The bloom passes, with bloom.
     pub bloom_ms: Option<f32>,
+}
+
+/// A frame in the overlay's graph: how long ago it was presented
+/// (seconds) and, if it continued an animation, how long it took (ms).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GraphFrame {
+    pub age: f32,
+    pub frame_ms: Option<f32>,
 }
 
 /// The recent frames, and when the overlay's text last refreshed.
@@ -71,7 +81,7 @@ impl Stats {
         while self
             .frames
             .front()
-            .is_some_and(|f| at.saturating_duration_since(f.at) > WINDOW)
+            .is_some_and(|f| at.saturating_duration_since(f.at) > HISTORY)
         {
             self.frames.pop_front();
         }
@@ -95,6 +105,26 @@ impl Stats {
     /// When the next refresh is due (the app wakes up for it at rest).
     pub fn next_refresh(&self, now: Instant) -> Instant {
         self.refreshed.map_or(now, |at| at + REFRESH)
+    }
+
+    /// The frames of the last `HISTORY`, oldest first, for the graph.
+    pub fn graph(&self, now: Instant) -> Vec<GraphFrame> {
+        let mut previous: Option<Instant> = None;
+        let mut graph = Vec::new();
+        for frame in &self.frames {
+            let frame_ms = previous.filter(|_| frame.continued).map(|previous| {
+                frame.at.saturating_duration_since(previous).as_secs_f32() * 1000.0
+            });
+            previous = Some(frame.at);
+            let age = now.saturating_duration_since(frame.at);
+            if age <= HISTORY {
+                graph.push(GraphFrame {
+                    age: age.as_secs_f32(),
+                    frame_ms,
+                });
+            }
+        }
+        graph
     }
 
     pub fn summary(&self, now: Instant) -> Summary {
@@ -271,6 +301,24 @@ mod tests {
         // Frames older than a second drop out.
         assert_eq!(stats.summary(t0 + ms(1_500)).fps, 4);
         assert_eq!(stats.summary(t0 + ms(3_000)).fps, 0);
+    }
+
+    #[test]
+    fn graphs_the_last_two_seconds() {
+        let t0 = Instant::now();
+        let mut stats = Stats::default();
+        stats.frame(t0, 1.0, 1.0, false);
+        stats.frame(t0 + ms(20), 1.0, 1.0, true);
+        stats.frame(t0 + ms(700), 1.0, 1.0, false);
+        let graph = stats.graph(t0 + ms(1_000));
+        let ages: Vec<f32> = graph.iter().map(|f| f.age).collect();
+        assert_eq!(ages, [1.0, 0.98, 0.3]);
+        // Only the continuing frame has a frame time; the others followed a
+        // pause (idle, or the start).
+        let times: Vec<Option<f32>> = graph.iter().map(|f| f.frame_ms).collect();
+        assert_eq!(times, [None, Some(20.0), None]);
+        // Two seconds on, the first two have dropped out.
+        assert_eq!(stats.graph(t0 + ms(2_500)).len(), 1);
     }
 
     #[test]

@@ -10,7 +10,7 @@ use glam::{Mat4, Vec2, Vec3};
 use resume_model::{DateRange, Education, PartialDate, Project, Resume, RichText, Work};
 
 use crate::lines::{self, LineInstance};
-use crate::shapes::ShapeInstance;
+use crate::shapes::{FOCUS_RING, ShapeInstance};
 use crate::skillmap::{self, NodeKind};
 use crate::text::{self, Font, GlyphInstance, Run, TextStyle, rgb, rgb_bytes};
 
@@ -126,6 +126,12 @@ const PATH: [f32; 4] = rgb(0x3E5A73);
 const CODE: [f32; 4] = rgb(0xE2C08D);
 /// Keycap outlines in the intro's hints.
 const KEYCAP: [f32; 4] = rgb(0x5E7A93);
+/// The x-ray view's outlines: glyph quads, shapes and click areas, and how
+/// wide they are (world units, about a pixel at a station).
+const XRAY_GLYPH: [f32; 4] = [0.09, 0.62, 0.8, 0.55];
+const XRAY_SHAPE: [f32; 4] = [0.85, 0.2, 0.75, 0.7];
+const XRAY_HIT: [f32; 4] = [0.95, 0.8, 0.1, 0.8];
+const XRAY_BORDER: f32 = 0.004;
 /// Station accents when an entry has no `x-color`, derived from the PDF blues.
 const PALETTE: [[f32; 4]; 4] = [rgb(0x6DB3E8), rgb(0x8CC4EF), rgb(0x6FC2C9), rgb(0x9AB6E8)];
 /// Skill group colors on the skill map.
@@ -152,6 +158,10 @@ pub enum Action {
     ToggleAbout,
     /// Shows or hides the performance overlay.
     ToggleStats,
+    /// Turns bloom on or off (performance overlay).
+    ToggleBloom,
+    /// Shows or hides the x-ray view (performance overlay).
+    ToggleXray,
 }
 
 /// Something outside the app.
@@ -525,7 +535,12 @@ impl Scene {
         };
         Some(match action {
             Action::Open(Link::Url(_)) => format!("{label}, link"),
-            Action::Open(_) | Action::ToggleSkills | Action::ToggleAbout | Action::ToggleStats => {
+            Action::Open(_)
+            | Action::ToggleSkills
+            | Action::ToggleAbout
+            | Action::ToggleStats
+            | Action::ToggleBloom
+            | Action::ToggleXray => {
                 format!("{label}, button")
             }
             Action::GoToStation(_) => format!("{label}: {}. Press Enter to go there.", related()),
@@ -562,6 +577,21 @@ impl Scene {
             view_proj: lens.projection * view,
             focus_distance: lens.distance,
         }
+    }
+
+    /// The x-ray view (performance overlay): outlines of every glyph quad,
+    /// shape and click area, showing how the scene is built from instanced
+    /// quads. Focus rings, drawn only with keyboard focus, are left out.
+    pub fn xray(&self) -> Vec<ShapeInstance> {
+        let outline = |rect, z, color| ShapeInstance::outlined(rect, z, 0.0, XRAY_BORDER, color);
+        let glyphs = self.glyphs.iter().map(|g| outline(g.rect, g.z, XRAY_GLYPH));
+        let shapes = self
+            .shapes
+            .iter()
+            .filter(|s| s.group & FOCUS_RING == 0)
+            .map(|s| outline(s.rect, s.z, XRAY_SHAPE));
+        let hits = self.hits.iter().map(|h| outline(h.rect, h.z, XRAY_HIT));
+        glyphs.chain(shapes).chain(hits).collect()
     }
 
     /// The hover group of the nearest link under `ndc` (-1..1, y up), among

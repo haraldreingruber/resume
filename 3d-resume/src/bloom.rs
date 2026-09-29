@@ -35,6 +35,8 @@ pub struct Bloom {
     down: wgpu::RenderPipeline,
     up: wgpu::RenderPipeline,
     composite: wgpu::RenderPipeline,
+    /// The scene without glow (bloom switched off in the overlay).
+    copy: wgpu::RenderPipeline,
     /// Textures for the current window size.
     targets: Option<Targets>,
 }
@@ -135,6 +137,7 @@ impl Bloom {
             down: pipeline("fs_down", HDR, None),
             up: pipeline("fs_up", HDR, Some(add)),
             composite: pipeline("fs_composite", ctx.view_format, None),
+            copy: pipeline("fs_copy", ctx.view_format, None),
             layout,
             sampler,
             targets: None,
@@ -219,12 +222,13 @@ impl Bloom {
     }
 
     /// Blurs the scene's bright parts and writes scene + glow to `target`
-    /// (a view in `ctx.view_format`).
+    /// (a view in `ctx.view_format`); without `glow`, only the scene.
     pub fn apply(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         mut timer: Option<&mut GpuTimer>,
+        glow: bool,
     ) {
         let targets = self.targets.as_ref().expect("prepared");
         let mips = &targets.mips;
@@ -256,6 +260,11 @@ impl Bloom {
                 pass.draw(0..3, 0..1);
             };
         let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
+        if !glow {
+            // The first mip's bind group also reads the scene.
+            pass("copy", target, clear, &self.copy, &mips[0].group, None);
+            return;
+        }
         let begin = timer
             .as_deref_mut()
             .and_then(|t| t.render_writes(Pass::Bloom, true, false));

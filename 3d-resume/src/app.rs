@@ -25,9 +25,9 @@ use crate::intro::{self, Intro};
 use crate::particles;
 use crate::renderer::Renderer;
 use crate::scene::{self, Action, Input, Lens, Metrics, Scene};
-use crate::stats::{self, Stats};
+use crate::stats::{self, GraphFrame, Stats};
 use crate::timeline::Timeline;
-use crate::ui::{self, Button, Insets, Panel, UiLayer};
+use crate::ui::{self, Button, Insets, Overlay, Panel, Switch, Switches, UiLayer};
 
 /// Timeline units per wheel line and per touch/trackpad pixel.
 const SCROLL_PER_LINE: f32 = 0.35;
@@ -74,16 +74,24 @@ pub struct App {
     about_open: bool,
     source: u32,
     session: String,
-    /// The performance overlay: frame statistics while it's shown, its text,
-    /// the About panel's switch for it, whether the GPU can time its passes,
-    /// and whether the last frame animated (or the app idles).
+    /// Hover groups of the About panel's links to shaders.
+    shaders: Vec<u32>,
+    /// The performance overlay: frame statistics while it's shown, its text
+    /// and graph, the About panel's switch for it and its own switches,
+    /// whether the GPU can time its passes, and whether the last frame
+    /// animated (or the app idles).
     stats: Option<Stats>,
     overlay: Vec<String>,
+    graph: Vec<GraphFrame>,
     /// Keys and a mouse, or touch: what the hints talk about.
     input: Input,
     overlay_switch: u32,
+    switches: Switches,
     gpu_timing: bool,
     animating: bool,
+    /// The overlay's switches: bloom's glow, and the x-ray view.
+    glow: bool,
+    xray: bool,
     window: Option<Arc<Window>>,
     state: Option<State>,
     last_frame: Instant,
@@ -176,6 +184,8 @@ impl App {
         let buttons = ui::native_buttons(&mut scene);
         let source = ui::source_link(&mut scene);
         let overlay_switch = ui::overlay_switch(&mut scene);
+        let shaders = ui::shader_links(&mut scene);
+        let switches = ui::overlay_switches(&mut scene);
         let start = options
             .station
             .as_deref()
@@ -192,12 +202,17 @@ impl App {
             about_open: false,
             source,
             session: String::new(),
+            shaders,
             stats: options.stats.then(Stats::default),
             input,
             overlay: Vec::new(),
+            graph: Vec::new(),
             overlay_switch,
+            switches,
             gpu_timing: false,
             animating: false,
+            glow: true,
+            xray: false,
             window: None,
             state: None,
             last_frame: Instant::now(),
@@ -349,12 +364,48 @@ impl App {
         }
     }
 
-    /// Keyboard focus targets: the open About panel's link, the links of
-    /// the station in view, then the screen-space buttons.
+    /// Keyboard focus targets: the performance overlay's switches (top-left,
+    /// first), the open About panel's links, the links of the station in
+    /// view, then the screen-space buttons.
     fn targets(&self) -> Vec<u32> {
-        let links = [self.source, self.overlay_switch];
-        let panel = if self.about_open { &links[..] } else { &[] };
-        focus::targets(&self.scene, self.station, panel, &self.buttons)
+        let mut panels: Vec<u32> = self
+            .overlay_switches()
+            .iter()
+            .map(|switch| switch.group)
+            .collect();
+        if self.about_open {
+            panels.extend(&self.shaders);
+            panels.extend([self.source, self.overlay_switch]);
+        }
+        focus::targets(&self.scene, self.station, &panels, &self.buttons)
+    }
+
+    /// The performance overlay's switches, while it's shown: bloom (where
+    /// the GPU has it) and the x-ray view.
+    fn overlay_switches(&self) -> Vec<Switch> {
+        if self.stats.is_none() {
+            return Vec::new();
+        }
+        let bloom = self
+            .state
+            .as_ref()
+            .is_some_and(|state| state.renderer.has_bloom());
+        let mut switches = Vec::new();
+        if bloom {
+            switches.push(Switch {
+                label: "Bloom",
+                key: "[B]",
+                on: self.glow,
+                group: self.switches.bloom,
+            });
+        }
+        switches.push(Switch {
+            label: "X-ray",
+            key: "[X]",
+            on: self.xray,
+            group: self.switches.xray,
+        });
+        switches
     }
 
     fn focus_index(&self, targets: &[u32]) -> Option<usize> {
@@ -447,6 +498,11 @@ impl App {
         let Some(state) = &mut self.state else { return };
         if rebuilt {
             state.renderer.set_scene(&state.gpu.context, &self.scene);
+            if self.xray {
+                state
+                    .renderer
+                    .set_xray(&state.gpu.context, &self.scene.xray());
+            }
         }
         state.lens = self.scene.lens(aspect);
         self.update_ui();
@@ -459,6 +515,7 @@ impl App {
     /// Rebuilds the screen-space layer: the buttons, and the About panel if
     /// it's open.
     fn update_ui(&mut self) {
+        let switches = self.overlay_switches();
         let Some(state) = &mut self.state else { return };
         let scale = self.window.as_ref().map_or(1.0, |w| w.scale_factor()) as f32;
         let insets = self
@@ -471,13 +528,26 @@ impl App {
         ];
         let panel = self.about_open.then(|| Panel {
             session: &self.session,
+            shaders: &self.shaders,
             source: self.source,
             overlay: self.overlay_switch,
             overlay_shown: self.stats.is_some(),
             keys: self.input == Input::Keyboard,
         });
-        let overlay = (!self.overlay.is_empty()).then_some(self.overlay.as_slice());
-        state.ui = UiLayer::new(size, scale, insets, &self.buttons, panel.as_ref(), overlay);
+        let overlay = (!self.overlay.is_empty()).then(|| Overlay {
+            lines: &self.overlay,
+            graph: &self.graph,
+            switches: &switches,
+            keys: self.input == Input::Keyboard,
+        });
+        state.ui = UiLayer::new(
+            size,
+            scale,
+            insets,
+            &self.buttons,
+            panel.as_ref(),
+            overlay.as_ref(),
+        );
         state.renderer.set_ui(&state.gpu.context, &state.ui);
     }
 
@@ -497,6 +567,7 @@ impl App {
                     size: [config.width, config.height],
                     session: &self.session,
                 };
+                self.graph = stats.graph(now);
                 stats::lines(&stats.summary(now), &info)
             }
             _ => Vec::new(),
@@ -504,11 +575,51 @@ impl App {
         self.update_ui();
     }
 
+    /// B or the overlay's switch: bloom's glow on or off.
+    fn toggle_glow(&mut self) {
+        self.set_glow(!self.glow);
+        announce(if self.glow { "Bloom on" } else { "Bloom off" });
+    }
+
+    fn set_glow(&mut self, on: bool) {
+        self.glow = on;
+        if let Some(state) = &mut self.state {
+            state.renderer.set_glow(on);
+        }
+        self.update_ui();
+        self.request_redraw();
+    }
+
+    /// X or the overlay's switch: the x-ray view on or off.
+    fn toggle_xray(&mut self) {
+        self.set_xray(!self.xray);
+        announce(if self.xray {
+            "X-ray view on: outlines of every glyph, shape and click area"
+        } else {
+            "X-ray view off"
+        });
+    }
+
+    fn set_xray(&mut self, on: bool) {
+        self.xray = on;
+        if let Some(state) = &mut self.state {
+            let outlines = if on { self.scene.xray() } else { Vec::new() };
+            state.renderer.set_xray(&state.gpu.context, &outlines);
+        }
+        self.update_ui();
+        self.request_redraw();
+    }
+
     /// P or the About panel's switch: shows or hides the performance
     /// overlay (and times the GPU while it's shown).
     fn toggle_stats(&mut self) {
         let show = self.stats.is_none();
         self.stats = show.then(Stats::default);
+        if !show {
+            // The overlay's switches go with it: back to the normal view.
+            self.set_glow(true);
+            self.set_xray(false);
+        }
         if let Some(state) = &mut self.state {
             self.gpu_timing = state.renderer.set_timing(&state.gpu.context, show);
         }
@@ -535,6 +646,8 @@ impl App {
         self.buttons = ui::native_buttons(&mut scene);
         self.source = ui::source_link(&mut scene);
         self.overlay_switch = ui::overlay_switch(&mut scene);
+        self.shaders = ui::shader_links(&mut scene);
+        self.switches = ui::overlay_switches(&mut scene);
         self.scene = scene;
         (self.hovered, self.pressed, self.focused, self.pinned) = (None, None, None, None);
         // Swapping a running scene restarts the particles from their cloud:
@@ -602,6 +715,8 @@ impl App {
             Some(Action::ToggleSkills) => self.toggle_skills(),
             Some(Action::ToggleAbout) => self.toggle_about(),
             Some(Action::ToggleStats) => self.toggle_stats(),
+            Some(Action::ToggleBloom) => self.toggle_glow(),
+            Some(Action::ToggleXray) => self.toggle_xray(),
             None => {}
         }
     }
@@ -733,6 +848,16 @@ impl App {
                     self.toggle_about();
                 } else if c.eq_ignore_ascii_case("p") {
                     self.toggle_stats();
+                } else if self.stats.is_some() && c.eq_ignore_ascii_case("x") {
+                    self.toggle_xray();
+                } else if self.stats.is_some()
+                    && c.eq_ignore_ascii_case("b")
+                    && self
+                        .state
+                        .as_ref()
+                        .is_some_and(|state| state.renderer.has_bloom())
+                {
+                    self.toggle_glow();
                 }
                 return;
             }
