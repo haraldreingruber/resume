@@ -31,6 +31,14 @@ pub fn run() {
     debug::startup::start();
 
     #[cfg(not(target_arch = "wasm32"))]
+    if let Some(dir) = arg("--icons") {
+        if let Err(error) = platform::icon::write_web_icons(std::path::Path::new(&dir)) {
+            log::error!("icons failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(dir) = arg("--screenshots") {
         if let Err(error) = screenshots(dir) {
             log::error!("screenshots failed: {error}");
