@@ -305,6 +305,8 @@ impl App {
 
 impl ApplicationHandler<AppEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "android")]
+        crate::platform::android::hide_system_bars();
         if self.window.is_some() {
             // Back from the background (phones): a new surface.
             if let Some(state) = &mut self.state {
@@ -436,6 +438,9 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             // The window lost focus, or on the web, Tab moved on from the canvas.
             WindowEvent::Focused(false) => self.set_focus(None),
+            // Android may have shown the system bars meanwhile.
+            #[cfg(target_os = "android")]
+            WindowEvent::Focused(true) => crate::platform::android::hide_system_bars(),
             WindowEvent::MouseWheel { delta, .. } => {
                 let forward = match delta {
                     MouseScrollDelta::LineDelta(_, y) => -y * SCROLL_PER_LINE,

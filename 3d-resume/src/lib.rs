@@ -65,6 +65,7 @@ fn android_main(android: winit::platform::android::activity::AndroidApp) {
             .with_tag("resume-3d"),
     );
     debug::startup::start();
+    platform::android::init(&android);
     let event_loop = EventLoop::<app::AppEvent>::with_user_event()
         .with_android_app(android)
         .build()
