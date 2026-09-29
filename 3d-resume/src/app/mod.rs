@@ -1,8 +1,10 @@
 //! winit application: creates the window, initializes the GPU (async on the
 //! web), turns input into timeline movement, link clicks, keyboard focus,
 //! the About panel, the performance overlay and fullscreen toggles, runs the
-//! particle intro, and renders on demand.
+//! particle intro, renders on demand, and talks to screen readers.
 
+#[cfg(accessibility)]
+mod accessibility;
 mod frame;
 mod input;
 mod navigation;
@@ -53,6 +55,16 @@ pub enum AppEvent {
     /// The page's About button was clicked.
     #[cfg(target_arch = "wasm32")]
     ToggleAbout,
+    /// A screen reader connected, or asks for something.
+    #[cfg(accessibility)]
+    Accessibility(accesskit_winit::Event),
+}
+
+#[cfg(accessibility)]
+impl From<accesskit_winit::Event> for AppEvent {
+    fn from(event: accesskit_winit::Event) -> Self {
+        Self::Accessibility(event)
+    }
 }
 
 /// Start options from the URL (web) or command line (native).
@@ -133,6 +145,12 @@ pub struct App {
     /// Whether Tab / Shift+Tab leaves the canvas, read by the page's listener.
     #[cfg(target_arch = "wasm32")]
     tab_leaves: std::rc::Rc<std::cell::Cell<[bool; 2]>>,
+    /// Native screen readers (created with the window), and what the tree's
+    /// live region says.
+    #[cfg(accessibility)]
+    accessibility: Option<crate::platform::accessibility::Accessibility>,
+    #[cfg(accessibility)]
+    announcement: String,
 }
 
 struct State {
@@ -244,6 +262,10 @@ impl App {
             intro: (!options.reduced_motion).then(|| Intro::new(start != 0)),
             #[cfg(target_arch = "wasm32")]
             tab_leaves: Default::default(),
+            #[cfg(accessibility)]
+            accessibility: None,
+            #[cfg(accessibility)]
+            announcement: String::new(),
         };
         #[cfg(target_arch = "wasm32")]
         {
@@ -264,6 +286,20 @@ impl App {
         } else if let Some(window) = &self.window {
             window.request_redraw();
         }
+    }
+
+    /// Tells screen readers: the web page's live region, or the native
+    /// accessibility tree's. (Android has no screen-reader bridge yet.)
+    fn announce(&mut self, text: &str) {
+        #[cfg(target_arch = "wasm32")]
+        crate::platform::web::announce(text);
+        #[cfg(accessibility)]
+        {
+            self.announcement = crate::platform::accessibility::vary(&self.announcement, text);
+            self.update_accessibility();
+        }
+        #[cfg(not(any(target_arch = "wasm32", accessibility)))]
+        let _ = text;
     }
 }
 
@@ -287,6 +323,8 @@ impl ApplicationHandler<AppEvent> for App {
             }
         };
         self.window = Some(window.clone());
+        #[cfg(accessibility)]
+        self.connect_accessibility(event_loop, &window);
         crate::debug::startup::mark("window created");
 
         let display = event_loop.owned_display_handle();
@@ -364,6 +402,8 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::ToggleSkills => self.toggle_skills(),
             #[cfg(target_arch = "wasm32")]
             AppEvent::ToggleAbout => self.toggle_about(),
+            #[cfg(accessibility)]
+            AppEvent::Accessibility(event) => self.accessibility_event(event.window_event),
             AppEvent::GpuReady(Err(error)) => {
                 log::error!("WebGPU initialization failed: {error}");
                 #[cfg(target_arch = "wasm32")]
@@ -374,6 +414,8 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        #[cfg(accessibility)]
+        self.accessibility_window_event(&event);
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
@@ -437,15 +479,6 @@ impl ApplicationHandler<AppEvent> for App {
             _ => {}
         }
     }
-}
-
-/// Tells screen readers (web: the page's live region). The native app has
-/// no screen-reader bridge yet.
-fn announce(text: &str) {
-    #[cfg(target_arch = "wasm32")]
-    crate::platform::web::announce(text);
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = text;
 }
 
 #[cfg(not(target_arch = "wasm32"))]

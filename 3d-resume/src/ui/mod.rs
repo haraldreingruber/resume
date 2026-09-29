@@ -536,6 +536,19 @@ impl UiLayer {
             .map(|&(_, group)| group)
     }
 
+    /// The box around `group`'s click areas (physical pixels, y up), if it
+    /// has any here.
+    #[cfg(accessibility)]
+    pub fn bounds(&self, group: u32) -> Option<[f32; 4]> {
+        self.hits
+            .iter()
+            .filter(|&&(_, g)| g == group)
+            .map(|&(rect, _)| rect)
+            .reduce(|[a0, b0, a1, b1], [x0, y0, x1, y1]| {
+                [a0.min(x0), b0.min(y0), a1.max(x1), b1.max(y1)]
+            })
+    }
+
     /// Whether `(x, y)` is on the open panel or the overlay (which hide the
     /// scene there).
     pub fn covers(&self, x: f32, y: f32) -> bool {
@@ -896,6 +909,11 @@ mod tests {
         let [x0, y0, x1, y1] = rows[2].0;
         assert!(x0 < 40.0);
         assert_eq!(layer.pick((x0 + x1) / 2.0, (y0 + y1) / 2.0), Some(22));
+        #[cfg(accessibility)]
+        {
+            assert_eq!(layer.bounds(22), Some(rows[2].0));
+            assert_eq!(layer.bounds(99), None);
+        }
     }
 
     #[test]

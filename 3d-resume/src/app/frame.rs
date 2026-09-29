@@ -116,9 +116,14 @@ impl App {
                     .filter(|&s| s > 0)
                     .and_then(|s| self.scene.station_id(s)),
             );
-            if let Some(summary) = self.scene.summary(station) {
-                announce(summary);
+            // Native screen readers hear the tree's station node change (with
+            // the links' final positions).
+            #[cfg(not(accessibility))]
+            if let Some(summary) = self.scene.summary(station).map(str::to_owned) {
+                self.announce(&summary);
             }
+            #[cfg(accessibility)]
+            self.update_accessibility();
         }
     }
 

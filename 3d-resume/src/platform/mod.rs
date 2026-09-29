@@ -1,6 +1,8 @@
 //! Per-platform glue: the web page, Android intents, opening links on each
-//! platform, and the desktop window icon.
+//! platform, the desktop window icon, and screen readers (AccessKit).
 
+#[cfg(accessibility)]
+pub mod accessibility;
 #[cfg(target_os = "android")]
 pub mod android;
 #[cfg(not(target_arch = "wasm32"))]
