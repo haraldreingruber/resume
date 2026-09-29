@@ -10,7 +10,7 @@ use minijinja::{AutoEscape, Environment, Value, context};
 use resume_model::{Basics, DateRange, Education, Language, Location, Project, Resume, RichText};
 use serde::{Deserialize, Serialize};
 
-use resume_model::about::ABOUT;
+use resume_model::about::{ABOUT, SHADERS_URL};
 use resume_model::site::{PDF_FILE, SITE_URL};
 
 pub fn readme(resume: &Resume) -> anyhow::Result<String> {
@@ -29,12 +29,45 @@ fn render(name: &str, resume: &Resume) -> anyhow::Result<String> {
         site_url => SITE_URL,
         pdf_file => PDF_FILE,
         about => Value::from_serialize(&ABOUT),
+        about_sections => Value::from_serialize(about_sections()),
     };
     let mut out = template.render(ctx)?;
     if !out.ends_with('\n') {
         out.push('\n');
     }
     Ok(out)
+}
+
+/// The About sections with their text split into spans, the technique
+/// names linking to their shaders.
+fn about_sections() -> Vec<AboutSection> {
+    ABOUT
+        .sections
+        .iter()
+        .map(|section| AboutSection {
+            heading: section.heading,
+            spans: section
+                .spans()
+                .into_iter()
+                .map(|span| AboutSpan {
+                    text: span.text,
+                    url: span.shader.map(|file| format!("{SHADERS_URL}{file}")),
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+#[derive(Serialize)]
+struct AboutSection {
+    heading: &'static str,
+    spans: Vec<AboutSpan>,
+}
+
+#[derive(Serialize)]
+struct AboutSpan {
+    text: &'static str,
+    url: Option<String>,
 }
 
 fn environment() -> Environment<'static> {

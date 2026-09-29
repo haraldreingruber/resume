@@ -6,6 +6,7 @@
 // - fs_up: smaller mip -> larger one, added on top (tent upsample), so the
 //   glow mixes several radii.
 // - fs_composite: scene + glow -> the window's surface.
+// - fs_copy: just the scene -> the window's surface (bloom switched off).
 
 // Brightness (max channel, linear) where the glow starts, the width of the
 // soft transition around it, and how strongly the glow is added back.
@@ -78,6 +79,11 @@ fn fs_up(in: VertexOutput) -> @location(0) vec4<f32> {
     sum += textureSampleLevel(source, bilinear, uv + vec2<f32>(-t.x, t.y), 0.0).rgb * 2.0;
     sum += textureSampleLevel(source, bilinear, uv + vec2<f32>(t.x, t.y), 0.0).rgb * 2.0;
     return vec4<f32>(sum / 12.0, 1.0);
+}
+
+@fragment
+fn fs_copy(in: VertexOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(textureSampleLevel(scene, bilinear, in.uv, 0.0).rgb, 1.0);
 }
 
 @fragment

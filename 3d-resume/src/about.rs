@@ -82,6 +82,18 @@ mod tests {
     }
 
     #[test]
+    fn every_linked_shader_exists() {
+        let shaders = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("shaders");
+        for link in ABOUT.shaders() {
+            assert!(
+                shaders.join(link.file).is_file(),
+                "{} is missing",
+                link.file
+            );
+        }
+    }
+
+    #[test]
     fn the_announcement_reads_the_whole_panel() {
         let text = announcement("Metal on Apple M2");
         for section in ABOUT.sections {

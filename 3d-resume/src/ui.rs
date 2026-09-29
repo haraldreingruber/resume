@@ -9,6 +9,7 @@ use resume_model::about::ABOUT;
 
 use crate::scene::{Action, Link, Scene};
 use crate::shapes::ShapeInstance;
+use crate::stats::{GraphFrame, HISTORY};
 use crate::text::{self, Font, GlyphInstance, Run, TextStyle, rgb};
 
 const BUTTON_TEXT: [f32; 4] = rgb(0xC9D4DE);
@@ -22,6 +23,15 @@ const PANEL_FILL: [f32; 4] = rgb(0x0A121C);
 const PANEL_TITLE: [f32; 4] = rgb(0xF2F6FA);
 const SESSION: [f32; 4] = rgb(0x6FC2C9);
 const MUTED: [f32; 4] = rgb(0x8AA0B4);
+/// The frame-time graph: its background, reference lines, and bars for
+/// frames at 60 fps or better, down to 30 fps, and slower.
+const GRAPH_FILL: [f32; 4] = rgb(0x101B28);
+const GRAPH_GRID: [f32; 4] = rgb(0x2A3B4D);
+const GRAPH_FAST: [f32; 4] = rgb(0x6FC2C9);
+const GRAPH_SLOW: [f32; 4] = rgb(0xE2C08D);
+const GRAPH_JANK: [f32; 4] = rgb(0xE0707A);
+/// The graph's height is this frame time.
+const GRAPH_MAX_MS: f32 = 50.0;
 
 /// Margin around the controls and the panel, in logical pixels.
 const MARGIN: f32 = 16.0;
@@ -62,6 +72,33 @@ pub fn overlay_switch(scene: &mut Scene) -> u32 {
     scene.add_action(Action::ToggleStats, "Performance overlay")
 }
 
+/// The About panel's links to shaders, registered as scene actions, in
+/// reading order.
+pub fn shader_links(scene: &mut Scene) -> Vec<u32> {
+    ABOUT
+        .shaders()
+        .map(|link| {
+            let label = format!("Shader {}", link.file);
+            scene.add_action(Action::Open(Link::Url(link.url())), &label)
+        })
+        .collect()
+}
+
+/// The performance overlay's switches, registered as scene actions.
+pub fn overlay_switches(scene: &mut Scene) -> Switches {
+    Switches {
+        bloom: scene.add_action(Action::ToggleBloom, "Bloom"),
+        xray: scene.add_action(Action::ToggleXray, "X-ray view"),
+    }
+}
+
+/// Hover groups of the performance overlay's switches.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Switches {
+    pub bloom: u32,
+    pub xray: u32,
+}
+
 /// How far (physical pixels) the controls stay in from the window's edges
 /// beyond their margin, e.g. clear of a phone's notch and home indicator.
 #[derive(Debug, Clone, Copy, Default)]
@@ -77,11 +114,32 @@ pub struct Insets {
 /// whether the overlay is shown.
 pub struct Panel<'a> {
     pub session: &'a str,
+    /// Hover groups of the shader links, in reading order.
+    pub shaders: &'a [u32],
     pub source: u32,
     pub overlay: u32,
     pub overlay_shown: bool,
     /// Whether to show key hints (there's a keyboard, not only touch).
     pub keys: bool,
+}
+
+/// The shown performance overlay: its heading and lines of numbers, the
+/// frame-time graph, and its switches.
+pub struct Overlay<'a> {
+    pub lines: &'a [String],
+    pub graph: &'a [GraphFrame],
+    pub switches: &'a [Switch],
+    /// Whether to show the switches' keys (there's a keyboard).
+    pub keys: bool,
+}
+
+/// A switch in the overlay: e.g. "Bloom: on" with its key.
+pub struct Switch {
+    pub label: &'static str,
+    /// Marked for a keycap, e.g. "[B]".
+    pub key: &'static str,
+    pub on: bool,
+    pub group: u32,
 }
 
 #[derive(Default)]
@@ -106,7 +164,7 @@ impl UiLayer {
         insets: Insets,
         buttons: &[Button],
         panel: Option<&Panel>,
-        overlay: Option<&[String]>,
+        overlay: Option<&Overlay>,
     ) -> Self {
         let mut layer = Self::default();
         let active = panel.map(|_| buttons.iter().find(|(label, _)| *label == "i"));
@@ -126,30 +184,81 @@ impl UiLayer {
             ];
             layer.panel(area, scale, panel);
         }
-        if let Some(lines) = overlay {
+        if let Some(overlay) = overlay {
             let top_left = [
                 MARGIN * scale + insets.left,
                 height - MARGIN * scale - insets.top,
             ];
             let max_width = width - 2.0 * MARGIN * scale - insets.left - insets.right;
-            layer.overlay(top_left, max_width, scale, lines);
+            layer.overlay(top_left, max_width, scale, overlay);
         }
         layer
     }
 
-    /// The performance overlay: its heading and lines in a box, top-left.
-    fn overlay(&mut self, [left, top]: [f32; 2], max_width: f32, scale: f32, lines: &[String]) {
+    /// The performance overlay, top-left: its heading and lines, the
+    /// frame-time graph, and its switches, in a box.
+    fn overlay(&mut self, [left, top]: [f32; 2], max_width: f32, scale: f32, overlay: &Overlay) {
         let pad = 10.0 * scale;
         let size = 12.5 * scale;
         let style = TextStyle::new(Font::Regular, size, BUTTON_TEXT).wrap(max_width - 2.0 * pad);
-        let width = lines
+        let run = |text, font, color| Run {
+            text,
+            font,
+            color,
+            group: 0,
+            key: false,
+        };
+        // The switches' line: "Bloom: on [B]   X-ray: off [X]".
+        let labels: Vec<String> = overlay
+            .switches
+            .iter()
+            .map(|switch| format!("{}: {}", switch.label, if switch.on { "on" } else { "off" }))
+            .collect();
+        let keys: Vec<Vec<(String, bool)>> = overlay
+            .switches
+            .iter()
+            .map(|switch| {
+                if overlay.keys {
+                    text::key_parts(&format!(" {}", switch.key))
+                } else {
+                    Vec::new()
+                }
+            })
+            .collect();
+        let mut switch_runs = Vec::new();
+        for (i, switch) in overlay.switches.iter().enumerate() {
+            if i > 0 {
+                switch_runs.push(run("     ", Font::Regular, BUTTON_TEXT));
+            }
+            switch_runs.push(Run {
+                group: switch.group,
+                ..run(&labels[i], Font::Bold, FOCUS)
+            });
+            switch_runs.extend(keys[i].iter().map(|(part, key)| Run {
+                key: *key,
+                ..run(part, Font::Bold, BUTTON_TEXT)
+            }));
+        }
+        let switches_text: String = switch_runs.iter().map(|r| r.text).collect();
+        let bold = TextStyle {
+            font: Font::Bold,
+            ..style
+        };
+        let width = overlay
+            .lines
             .iter()
             .map(|line| text::measure(line, style)[0])
+            .chain([
+                text::measure(&switches_text, bold)[0],
+                (240.0 * scale).min(max_width - 2.0 * pad),
+            ])
             .fold(0.0, f32::max)
             + 2.0 * pad;
+
         let mut glyphs = Vec::new();
+        let mut shapes = Vec::new();
         let mut cursor = Vec3::new(left + pad, top - pad, 0.0);
-        for (i, line) in lines.iter().enumerate() {
+        for (i, line) in overlay.lines.iter().enumerate() {
             let style = if i == 0 {
                 TextStyle {
                     font: Font::Bold,
@@ -160,6 +269,19 @@ impl UiLayer {
                 style
             };
             cursor.y -= text::layout(line, style, cursor, &mut glyphs) + 3.0 * scale;
+        }
+        if !overlay.graph.is_empty() || !overlay.lines.is_empty() {
+            let height = 40.0 * scale;
+            cursor.y -= 4.0 * scale;
+            let graph = [left + pad, cursor.y - height, left + width - pad, cursor.y];
+            graph_shapes(graph, scale, overlay.graph, &mut shapes, &mut glyphs);
+            cursor.y -= height + 8.0 * scale;
+        }
+        if !switch_runs.is_empty() {
+            let paragraph = text::layout_runs(&switch_runs, style, cursor, &mut glyphs);
+            cursor.y -= paragraph.height + 3.0 * scale;
+            decorate_links(&paragraph.boxes, size, scale, &mut shapes, &mut self.hits);
+            keycaps(&paragraph.keys, size, scale, &mut shapes);
         }
         let bottom = cursor.y + 3.0 * scale - pad;
         let rect = [left, bottom, left + width, top];
@@ -173,6 +295,7 @@ impl UiLayer {
             scale,
             BUTTON_BORDER,
         ));
+        self.shapes.extend(shapes);
         self.glyphs.extend(glyphs);
         self.overlay = Some(rect);
     }
@@ -368,6 +491,8 @@ impl PanelContent {
         let body = TextStyle::new(Font::Regular, 14.0 * scale, BUTTON_TEXT)
             .wrap(wrap)
             .line_spacing(1.2);
+        let mut boxes = Vec::new();
+        let mut shader_groups = panel.shaders.iter().copied();
         for section in ABOUT.sections {
             text(
                 &mut content,
@@ -375,12 +500,19 @@ impl PanelContent {
                 heading,
                 4.0,
             );
-            text(
-                &mut content,
-                &[run(section.text, Font::Regular, BUTTON_TEXT)],
-                body,
-                12.0,
-            );
+            // Technique names link to their shaders.
+            let runs: Vec<Run> = section
+                .spans()
+                .into_iter()
+                .map(|span| match span.shader {
+                    Some(_) => Run {
+                        group: shader_groups.next().unwrap_or(0),
+                        ..run(span.text, Font::Regular, FOCUS)
+                    },
+                    None => run(span.text, Font::Regular, BUTTON_TEXT),
+                })
+                .collect();
+            boxes.extend(text(&mut content, &runs, body, 12.0).boxes);
         }
         text(
             &mut content,
@@ -396,7 +528,7 @@ impl PanelContent {
             ..run(ABOUT.source_label, Font::Bold, FOCUS)
         };
         let size = body.size;
-        let mut boxes = text(&mut content, &[link], body, 8.0).boxes;
+        boxes.extend(text(&mut content, &[link], body, 8.0).boxes);
         let switch = Run {
             group: panel.overlay,
             ..run(
@@ -423,38 +555,111 @@ impl PanelContent {
             .collect();
         let paragraph = text(&mut content, &runs, body, 0.0);
         boxes.extend(paragraph.boxes);
-        for key in paragraph.keys {
-            let rect = text::keycap(key, size);
-            content.shapes.push(ShapeInstance::outlined(
-                rect,
-                0.0,
-                size * 0.22,
-                scale,
-                MUTED,
-            ));
-        }
-        for (group, [x0, y0, x1, y1]) in boxes {
-            // Underline, focus ring and a slightly enlarged hit region, as
-            // for links in the scene.
-            let underline = y0 + (y1 - y0) * 0.17;
-            content.shapes.push(
-                ShapeInstance::filled([x0, underline - scale, x1, underline], 0.0, 0.0, FOCUS)
-                    .group(group),
-            );
-            let ring = size * 0.25;
-            let rect = [x0 - ring, y0 - ring, x1 + ring, y1 + ring];
-            content.shapes.push(ShapeInstance::focus_ring(
-                rect,
-                0.0,
-                size * 0.3,
-                2.0 * scale,
-                FOCUS,
-                group,
-            ));
-            content.hits.push((rect, group));
-        }
+        keycaps(&paragraph.keys, size, scale, &mut content.shapes);
+        decorate_links(&boxes, size, scale, &mut content.shapes, &mut content.hits);
         content.height = -cursor.y + pad;
         content
+    }
+}
+
+/// Underlines, focus rings and slightly enlarged click areas for links
+/// (`boxes` from a paragraph) in text of `size`, as for links in the scene.
+fn decorate_links(
+    boxes: &[(u32, [f32; 4])],
+    size: f32,
+    scale: f32,
+    shapes: &mut Vec<ShapeInstance>,
+    hits: &mut Vec<([f32; 4], u32)>,
+) {
+    for &(group, [x0, y0, x1, y1]) in boxes {
+        let underline = y0 + (y1 - y0) * 0.17;
+        shapes.push(
+            ShapeInstance::filled([x0, underline - scale, x1, underline], 0.0, 0.0, FOCUS)
+                .group(group),
+        );
+        let ring = size * 0.25;
+        let rect = [x0 - ring, y0 - ring, x1 + ring, y1 + ring];
+        shapes.push(ShapeInstance::focus_ring(
+            rect,
+            0.0,
+            size * 0.3,
+            2.0 * scale,
+            FOCUS,
+            group,
+        ));
+        hits.push((rect, group));
+    }
+}
+
+/// Keycap outlines for key runs (`keys` from a paragraph) in text of `size`.
+fn keycaps(keys: &[[f32; 4]], size: f32, scale: f32, shapes: &mut Vec<ShapeInstance>) {
+    for &key in keys {
+        let rect = text::keycap(key, size);
+        shapes.push(ShapeInstance::outlined(
+            rect,
+            0.0,
+            size * 0.22,
+            scale,
+            MUTED,
+        ));
+    }
+}
+
+/// The frame-time graph in `rect` (physical pixels): the last `HISTORY` of
+/// frames from right (now) to left, each animation frame a bar as wide as it
+/// took and as tall as its time (up to `GRAPH_MAX_MS`), each idle frame a
+/// tick; lines and labels mark 60 and 30 fps.
+fn graph_shapes(
+    [x0, y0, x1, y1]: [f32; 4],
+    scale: f32,
+    frames: &[GraphFrame],
+    shapes: &mut Vec<ShapeInstance>,
+    glyphs: &mut Vec<GlyphInstance>,
+) {
+    let (width, height) = (x1 - x0, y1 - y0);
+    let history = HISTORY.as_secs_f32();
+    let x_at = |age: f32| x1 - age / history * width;
+    let y_at = |ms: f32| y0 + (ms / GRAPH_MAX_MS).min(1.0) * height;
+    shapes.push(ShapeInstance::filled(
+        [x0, y0, x1, y1],
+        0.0,
+        3.0 * scale,
+        GRAPH_FILL,
+    ));
+    let label = TextStyle::new(Font::Regular, 9.0 * scale, MUTED);
+    for (fps, ms) in [(60, 1000.0 / 60.0), (30, 1000.0 / 30.0)] {
+        let y = y_at(ms);
+        shapes.push(ShapeInstance::filled(
+            [x0, y - 0.5 * scale, x1, y + 0.5 * scale],
+            0.0,
+            0.0,
+            GRAPH_GRID,
+        ));
+        let top = Vec3::new(x0 + 3.0 * scale, y + 10.0 * scale, 0.0);
+        text::layout(&format!("{fps} fps"), label, top, glyphs);
+    }
+    for frame in frames {
+        let x = x_at(frame.age);
+        let bar = match frame.frame_ms {
+            Some(ms) => {
+                let color = if ms <= 17.5 {
+                    GRAPH_FAST
+                } else if ms <= 34.0 {
+                    GRAPH_SLOW
+                } else {
+                    GRAPH_JANK
+                };
+                let left = (x - ms / 1000.0 / history * width).max(x0);
+                // At least a pixel, with a hairline gap to the next bar.
+                let right = (x - 0.5 * scale).max(left + scale);
+                ([left, y0, right, y_at(ms)], color)
+            }
+            None => (
+                [x - 0.5 * scale, y0, x + 0.5 * scale, y0 + 3.0 * scale],
+                MUTED,
+            ),
+        };
+        shapes.push(ShapeInstance::filled(bar.0, 0.0, 0.0, bar.1));
     }
 }
 
@@ -484,8 +689,13 @@ mod tests {
         let buttons = native_buttons(&mut scene);
         let source = source_link(&mut scene);
         let overlay = overlay_switch(&mut scene);
+        let shaders = shader_links(&mut scene);
+        let switches = overlay_switches(&mut scene);
         assert!(source != 0 && overlay != 0);
         assert!(buttons.iter().all(|&(_, group)| group != 0));
+        assert_eq!(shaders.len(), ABOUT.shaders().count());
+        assert!(shaders.iter().all(|&group| group != 0));
+        assert!(switches.bloom != 0 && switches.xray != 0);
     }
 
     #[test]
@@ -496,11 +706,55 @@ mod tests {
             left: 20.0,
             ..Insets::default()
         };
-        let layer = UiLayer::new(SIZE, 1.0, insets, &[], None, Some(&lines));
-        let [x0, _, x1, y1] = layer.overlay.expect("shown");
+        let graph = [
+            GraphFrame {
+                age: 1.5,
+                frame_ms: None,
+            },
+            GraphFrame {
+                age: 0.2,
+                frame_ms: Some(16.7),
+            },
+        ];
+        let switches = [
+            Switch {
+                label: "Bloom",
+                key: "[B]",
+                on: true,
+                group: 7,
+            },
+            Switch {
+                label: "X-ray",
+                key: "[X]",
+                on: false,
+                group: 8,
+            },
+        ];
+        let overlay = Overlay {
+            lines: &lines,
+            graph: &graph,
+            switches: &switches,
+            keys: true,
+        };
+        let layer = UiLayer::new(SIZE, 1.0, insets, &[], None, Some(&overlay));
+        let [x0, y0, x1, y1] = layer.overlay.expect("shown");
         assert_eq!((x0, y1), (MARGIN + 20.0, 600.0 - MARGIN - 50.0));
-        assert!(x1 < 400.0 && layer.covers(x0 + 5.0, y1 - 5.0));
+        assert!(x1 < 420.0 && layer.covers(x0 + 5.0, y1 - 5.0));
         assert!(!layer.glyphs.is_empty());
+        // Both switches are clickable, inside the box.
+        for group in [7, 8] {
+            let (rect, _) = *layer
+                .hits
+                .iter()
+                .find(|(_, g)| *g == group)
+                .expect("switch");
+            let [hx0, hy0, hx1, hy1] = rect;
+            assert!(hx0 >= x0 && hx1 <= x1 && hy0 >= y0 && hy1 <= y1);
+            assert_eq!(
+                layer.pick((hx0 + hx1) / 2.0, (hy0 + hy1) / 2.0),
+                Some(group)
+            );
+        }
     }
 
     #[test]
@@ -527,6 +781,7 @@ mod tests {
         let panel = Panel {
             session: "Vulkan on NVIDIA GeForce GTX 960M",
             source: 9,
+            shaders: &[11, 12, 13, 14, 15],
             overlay: 10,
             overlay_shown: false,
             keys: true,

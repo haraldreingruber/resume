@@ -194,9 +194,9 @@
 <footer>
   <details id="about">
     <summary>{{ about.title }}</summary>
-    {% for s in about.sections %}
+    {% for s in about_sections %}
     <h3>{{ s.heading }}</h3>
-    <p>{{ s.text }}</p>
+    <p>{% for span in s.spans %}{% if span.url %}<a href="{{ span.url }}">{{ span.text }}</a>{% else %}{{ span.text }}{% endif %}{% endfor %}</p>
     {% endfor %}
     <p><a href="{{ about.source_url }}">{{ about.source_label }}</a></p>
   </details>
