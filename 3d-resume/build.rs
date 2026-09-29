@@ -32,7 +32,7 @@ const RANGE_PX: f64 = 4.0;
 const ATLAS_WIDTH: u32 = 1024;
 const PADDING: u32 = 1;
 /// Characters that normalization or the app may add to the YAML's own.
-const EXTRA_CHARS: &str = "–—·“”‘’…•×";
+const EXTRA_CHARS: &str = "–—·“”‘’…•×\u{a0}";
 
 fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());

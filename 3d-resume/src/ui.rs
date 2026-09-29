@@ -80,6 +80,8 @@ pub struct Panel<'a> {
     pub source: u32,
     pub overlay: u32,
     pub overlay_shown: bool,
+    /// Whether to show key hints (there's a keyboard, not only touch).
+    pub keys: bool,
 }
 
 #[derive(Default)]
@@ -353,6 +355,7 @@ impl PanelContent {
             font,
             color,
             group: 0,
+            key: false,
         };
         let title = TextStyle::new(Font::Bold, 17.0 * scale, PANEL_TITLE).wrap(wrap);
         text(
@@ -406,8 +409,30 @@ impl PanelContent {
                 FOCUS,
             )
         };
-        let key = run(" (P)", Font::Regular, MUTED);
-        boxes.extend(text(&mut content, &[switch, key], body, 0.0).boxes);
+        // Its key, as a keycap.
+        let parts = if panel.keys {
+            text::key_parts(" [P]")
+        } else {
+            Vec::new()
+        };
+        let runs: Vec<Run> = std::iter::once(switch)
+            .chain(parts.iter().map(|(part, key)| Run {
+                key: *key,
+                ..run(part, Font::Bold, BUTTON_TEXT)
+            }))
+            .collect();
+        let paragraph = text(&mut content, &runs, body, 0.0);
+        boxes.extend(paragraph.boxes);
+        for key in paragraph.keys {
+            let rect = text::keycap(key, size);
+            content.shapes.push(ShapeInstance::outlined(
+                rect,
+                0.0,
+                size * 0.22,
+                scale,
+                MUTED,
+            ));
+        }
         for (group, [x0, y0, x1, y1]) in boxes {
             // Underline, focus ring and a slightly enlarged hit region, as
             // for links in the scene.
@@ -504,6 +529,7 @@ mod tests {
             source: 9,
             overlay: 10,
             overlay_shown: false,
+            keys: true,
         };
         UiLayer::new(size, 1.0, insets, buttons, Some(&panel), None)
     }

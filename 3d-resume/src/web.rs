@@ -215,14 +215,19 @@ pub fn open_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the main pointer is a finger (phones, tablets): hints then talk
+/// about taps instead of keys.
+pub fn coarse_pointer() -> bool {
+    media_matches("(pointer: coarse)")
+}
+
 /// Whether the user asked the OS/browser to minimize animations.
 pub fn prefers_reduced_motion() -> bool {
+    media_matches("(prefers-reduced-motion: reduce)")
+}
+
+fn media_matches(query: &str) -> bool {
     web_sys::window()
-        .and_then(|window| {
-            window
-                .match_media("(prefers-reduced-motion: reduce)")
-                .ok()
-                .flatten()
-        })
-        .is_some_and(|query| query.matches())
+        .and_then(|window| window.match_media(query).ok().flatten())
+        .is_some_and(|list| list.matches())
 }

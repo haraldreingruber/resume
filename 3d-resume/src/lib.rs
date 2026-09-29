@@ -81,6 +81,7 @@ fn android_main(android: winit::platform::android::activity::AndroidApp) {
             station: None,
             reduced_motion: false,
             stats: false,
+            touch: true,
         },
     );
 }
@@ -99,19 +100,20 @@ fn start(event_loop: EventLoop<app::AppEvent>, options: app::Options) {
     }
 }
 
-/// Deep link, reduced motion and the performance overlay from the page URL
-/// (`?station=<id>`, `?stats`) and the media query.
+/// Deep link, reduced motion, the performance overlay and touch input from
+/// the page URL (`?station=<id>`, `?stats`) and media queries.
 #[cfg(target_arch = "wasm32")]
 fn options() -> app::Options {
     app::Options {
         station: web::query_param("station"),
         reduced_motion: web::prefers_reduced_motion(),
         stats: web::has_query_param("stats"),
+        touch: web::coarse_pointer(),
     }
 }
 
 /// `--station <id|index>`, `--reduced-motion` and `--stats` (performance
-/// overlay).
+/// overlay). iPhones are touch screens (Android starts in `android_main`).
 #[cfg(not(target_arch = "wasm32"))]
 fn options() -> app::Options {
     let flag = |name| std::env::args().any(|a| a == name);
@@ -119,11 +121,12 @@ fn options() -> app::Options {
         station: arg("--station"),
         reduced_motion: flag("--reduced-motion"),
         stats: flag("--stats"),
+        touch: cfg!(target_os = "ios"),
     }
 }
 
 /// `--screenshots <dir> [--station <id|index> | --position <t>] [--time <s>]
-/// [--size 1280x800] [--scale <n>] [--focus <n>] [--about] [--stats]`:
+/// [--size 1280x800] [--scale <n>] [--focus <n>] [--about] [--stats] [--touch]`:
 /// renders the stations, two frames of the particle intro and the About
 /// panel (or one frame) headlessly to PNG files and exits. `--stats` adds
 /// the performance overlay.
@@ -144,6 +147,7 @@ fn screenshots(dir: String) -> Result<(), String> {
         focus: number("--focus")?,
         about: std::env::args().any(|a| a == "--about"),
         stats: std::env::args().any(|a| a == "--stats"),
+        touch: std::env::args().any(|a| a == "--touch"),
     })
 }
 

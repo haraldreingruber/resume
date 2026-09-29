@@ -13,7 +13,7 @@ use crate::focus;
 use crate::gpu::Context;
 use crate::intro::{self, Intro};
 use crate::renderer::Renderer;
-use crate::scene::{Metrics, Scene};
+use crate::scene::{Input, Metrics, Scene};
 use crate::stats::{self, Stats};
 use crate::ui::{self, Insets, Panel, UiLayer};
 
@@ -48,6 +48,8 @@ pub struct Request {
     pub about: bool,
     /// Shows the performance overlay (with the headless GPU's timings).
     pub stats: bool,
+    /// Hints for a touch screen instead of keys (phones).
+    pub touch: bool,
 }
 
 /// One image: where on the timeline, until when the particles run (`None`:
@@ -152,7 +154,12 @@ pub fn run(request: &Request) -> Result<(), String> {
     let aspect = width as f32 / height as f32;
     let resume = crate::content::resume();
     // The layout the app would pick for this screen shape.
-    let mut scene = Scene::with_metrics(&resume, Metrics::for_aspect(aspect));
+    let input = if request.touch {
+        Input::Touch
+    } else {
+        Input::Keyboard
+    };
+    let mut scene = Scene::build(&resume, Metrics::for_aspect(aspect), input);
     let buttons = ui::native_buttons(&mut scene);
     let source = ui::source_link(&mut scene);
     let overlay_switch = ui::overlay_switch(&mut scene);
@@ -221,6 +228,7 @@ pub fn run(request: &Request) -> Result<(), String> {
             source,
             overlay: overlay_switch,
             overlay_shown: request.stats,
+            keys: !request.touch,
         });
         let size = [width as f32, height as f32];
         let ui = UiLayer::new(
