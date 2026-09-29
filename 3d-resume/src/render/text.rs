@@ -9,6 +9,8 @@ use std::ops::Range;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 
+use crate::render::atlas_codec;
+
 // Generated metrics can happen to resemble constants like 1/π.
 #[allow(clippy::approx_constant)]
 mod baked {
@@ -18,20 +20,13 @@ mod baked {
 
 pub use baked::{ATLAS_SIZE, DISTANCE_RANGE_PX};
 
-pub const ATLAS_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/atlas.png"));
+/// The baked MSDF atlas, stored as `atlas_codec` describes.
+const ATLAS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/atlas.bin"));
 
 /// The baked MSDF atlas as RGBA8 pixels (distance data, top row first).
 pub fn atlas_rgba() -> Vec<u8> {
-    let decoder = png::Decoder::new(std::io::Cursor::new(ATLAS_PNG));
-    let mut reader = decoder.read_info().expect("baked atlas is a valid PNG");
-    let mut pixels = vec![0; reader.output_buffer_size().expect("atlas size")];
-    let info = reader.next_frame(&mut pixels).expect("decode atlas");
     let [width, height] = ATLAS_SIZE;
-    assert_eq!(
-        (info.width, info.height, info.color_type),
-        (width, height, png::ColorType::Rgba)
-    );
-    pixels
+    atlas_codec::decode(ATLAS, width as usize, height as usize)
 }
 
 /// Index into `build.rs`'s font list.
@@ -412,6 +407,18 @@ const fn srgb_to_linear(c: u8) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_baked_atlas_decodes_to_its_size() {
+        let [width, height] = ATLAS_SIZE;
+        let rgba = atlas_rgba();
+        assert_eq!(rgba.len(), width as usize * height as usize * 4);
+        // Glyphs are in there: some texels are inside a letter (above 127).
+        assert!(
+            rgba.chunks(4)
+                .any(|t| t[0] > 200 && t[1] > 200 && t[2] > 200)
+        );
+    }
 
     fn styled(text: &str) -> Vec<StyledChar> {
         text.chars()
