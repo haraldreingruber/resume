@@ -247,6 +247,7 @@ impl App {
             crate::platform::web::forward_nav_clicks(app.proxy.clone());
         }
         app.publish_tab_leaves();
+        crate::debug::startup::mark("scene built");
         app
     }
 
@@ -282,6 +283,7 @@ impl ApplicationHandler<AppEvent> for App {
             }
         };
         self.window = Some(window.clone());
+        crate::debug::startup::mark("window created");
 
         let display = event_loop.owned_display_handle();
         let proxy = self.proxy.clone();
@@ -348,7 +350,11 @@ impl ApplicationHandler<AppEvent> for App {
                 self.state = Some(state);
                 self.layout();
                 self.last_frame = Instant::now();
-                self.request_redraw();
+                // The first frame right away, not via a redraw request: a
+                // hidden desktop window gets none (`redraw` shows it).
+                self.drawing = true;
+                self.redraw();
+                self.drawing = false;
             }
             #[cfg(target_arch = "wasm32")]
             AppEvent::ToggleSkills => self.toggle_skills(),
@@ -447,7 +453,23 @@ fn window_attributes(title: &str) -> winit::window::WindowAttributes {
     if cfg!(any(target_os = "android", target_os = "ios")) {
         attributes
     } else {
-        attributes.with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0))
+        // Hidden until its first frame (see `reveal`), instead of an empty
+        // white window while the GPU starts.
+        attributes
+            .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0))
+            .with_visible(false)
+    }
+}
+
+/// Shows the desktop window, created hidden, once it has something to show.
+fn reveal(window: &Window) {
+    if !cfg!(any(
+        target_arch = "wasm32",
+        target_os = "android",
+        target_os = "ios"
+    )) && window.is_visible() == Some(false)
+    {
+        window.set_visible(true);
     }
 }
 
