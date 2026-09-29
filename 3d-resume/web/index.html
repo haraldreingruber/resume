@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Harald Reingruber – 3D Resume</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
+<!-- Installable web app: manifest, home-screen icons, and an offline copy
+     (sw.js: network first, so updates show on the next visit). -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#02060b">
+<script>
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
+</script>
 <meta name="description" content="Resume of Harald Reingruber, rendered in 3D with Rust, wgpu and WebGPU.">
 <script>
   // Browsers without WebGPU get the plain HTML resume (generated from the same data).
@@ -48,6 +56,12 @@
       data-wasm-opt-params="--enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-reference-types --enable-multivalue" />
 <link data-trunk rel="copy-file" href="plain.html" />
 <link data-trunk rel="copy-file" href="favicon.svg" />
+<link data-trunk rel="copy-file" href="manifest.webmanifest" />
+<link data-trunk rel="copy-file" href="sw.js" />
+<link data-trunk rel="copy-file" href="icon-192.png" />
+<link data-trunk rel="copy-file" href="icon-512.png" />
+<link data-trunk rel="copy-file" href="icon-maskable-512.png" />
+<link data-trunk rel="copy-file" href="apple-touch-icon.png" />
 </head>
 <body>
 <header><a class="skip" href="plain.html">Skip to the text version of this resume</a></header>
