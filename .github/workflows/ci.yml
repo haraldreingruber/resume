@@ -33,6 +33,22 @@ jobs:
       - name: Generated files are up to date with content/resume.yaml
         run: cargo gen check
 
+  dependencies:
+    name: Dependencies (cargo deny)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        checks: [advisories, bans licenses sources]
+    # A new security advisory can appear any day, unrelated to a change: it's
+    # reported (the job's annotations) but doesn't fail the build.
+    continue-on-error: ${{ matrix.checks == 'advisories' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check ${{ matrix.checks }}
+
   native:
     name: Native
     uses: ./.github/workflows/native.yml

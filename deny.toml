@@ -1,0 +1,53 @@
+# cargo deny (CI job "Dependencies"): security advisories, licenses, banned
+# or duplicate crates, and where crates come from.
+# Run locally: cargo deny check
+
+[graph]
+# Every platform the app builds for, so platform-specific crates count.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "wasm32-unknown-unknown",
+    "aarch64-linux-android",
+    "aarch64-apple-ios-sim",
+]
+
+[advisories]
+# Vulnerabilities and unsound crates anywhere; unmaintained ones only when
+# this workspace depends on them directly.
+unmaintained = "workspace"
+unsound = "all"
+ignore = [
+    # Unmaintained, no vulnerability. Build time only: build.rs parses the
+    # bundled Lato fonts (trusted input) for the MSDF atlas, and fdsm reads
+    # glyph outlines through fdsm-ttf-parser. Revisit: skrifa (fontations).
+    { id = "RUSTSEC-2026-0192", reason = "build-time parsing of bundled fonts; see comment" },
+]
+
+[licenses]
+confidence-threshold = 0.93
+# Permissive licenses only (as of 2026-09: every dependency is under one of
+# these, or offers one of them as an option).
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Zlib",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+]
+# The workspace's own crates aren't published.
+private = { ignore = true }
+
+[bans]
+# The wgpu/winit ecosystem pulls several versions of some crates (e.g.
+# windows-sys): report them, don't fail.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
