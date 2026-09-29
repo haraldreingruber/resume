@@ -23,7 +23,7 @@ jobs:
     name: Rust checks and generated files
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install toolchain from rust-toolchain.toml
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -50,7 +50,7 @@ jobs:
     name: PDF
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: xu-cheng/latex-action@v4
         with:
           working_directory: latex
@@ -66,7 +66,7 @@ jobs:
     name: Web build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install toolchain from rust-toolchain.toml
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2

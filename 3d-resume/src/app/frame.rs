@@ -52,8 +52,16 @@ impl App {
         });
         // The rest of it: getting the surface texture and presenting it.
         let waited = rendering.elapsed().saturating_sub(encoded);
+        // The first frame is ready: show the window. (Also when a frame was
+        // skipped, in case a hidden window's surface can't present.)
+        if let Some(window) = &self.window {
+            reveal(window);
+        }
         if presented {
             self.presented += 1;
+            if self.presented == 1 {
+                crate::debug::startup::mark("first frame");
+            }
             if self.presented.is_power_of_two() {
                 let (frames, seconds) = (self.presented, self.started.elapsed().as_secs_f32());
                 log::info!("{frames} frames presented after {seconds:.1} s");

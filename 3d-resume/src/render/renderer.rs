@@ -11,6 +11,7 @@ use glam::Mat4;
 use wgpu::util::DeviceExt;
 
 use crate::debug::gpu_timer::{GpuTimer, Pass};
+use crate::debug::startup;
 use crate::debug::stats::{DrawCounts, GpuTimes};
 use crate::render::bloom::{self, Bloom};
 use crate::render::gpu::Context;
@@ -227,6 +228,7 @@ impl Renderer {
     pub fn new(ctx: &Context, scene: &Scene, particles: bool) -> Self {
         let device = &ctx.device;
         let atlas_pixels = text::atlas_rgba();
+        startup::mark("atlas decoded");
         let atlas = atlas_texture(ctx, &atlas_pixels).create_view(&Default::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("atlas"),
@@ -341,9 +343,11 @@ impl Renderer {
             .is_some()
             .then(|| Pipelines::new(ctx, &scene_layout, &shaders, ctx.view_format));
 
+        startup::mark("pipelines created");
         let particles = particles
             .then(|| Particles::new(ctx, &layout, &scene.title, &atlas_pixels, scene_format))
             .flatten();
+        startup::mark("particles sampled");
 
         Self {
             scene_pipelines,

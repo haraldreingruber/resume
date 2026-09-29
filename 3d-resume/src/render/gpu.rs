@@ -6,6 +6,18 @@ use winit::dpi::PhysicalSize;
 use winit::event_loop::OwnedDisplayHandle;
 use winit::window::Window;
 
+use crate::debug::startup;
+
+/// Graphics APIs to try first, and the ones to fall back to if none of those
+/// has an adapter. Starting every API at once costs the sum of their startup
+/// times (Vulkan and DirectX 12 together: ~1.2 s instead of ~0.8 s on a
+/// Windows laptop), and DirectX 12 compiles shaders far slower than Vulkan.
+/// `WGPU_BACKEND` overrides both, e.g. `WGPU_BACKEND=dx12`.
+pub const FIRST_CHOICE: wgpu::Backends = wgpu::Backends::VULKAN
+    .union(wgpu::Backends::METAL)
+    .union(wgpu::Backends::BROWSER_WEBGPU);
+pub const FALLBACK: wgpu::Backends = wgpu::Backends::DX12.union(wgpu::Backends::GL);
+
 /// What the renderer needs: the device, its queue and the color format it
 /// draws in. Shared by the window surface and headless screenshots.
 pub struct Context {
@@ -32,6 +44,7 @@ impl Context {
         label: &str,
         view_format: wgpu::TextureFormat,
     ) -> Result<Self, String> {
+        startup::mark("GPU adapter");
         let info = adapter.get_info();
         log::info!("GPU adapter: {info:?}");
         let (device, queue) = adapter
@@ -44,6 +57,7 @@ impl Context {
             })
             .await
             .map_err(|e| e.to_string())?;
+        startup::mark("GPU device");
         let compute = adapter
             .get_downlevel_capabilities()
             .flags
@@ -76,23 +90,41 @@ pub struct Gpu {
 
 impl Gpu {
     pub async fn new(display: OwnedDisplayHandle, window: Arc<Window>) -> Result<Self, String> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(
-            Box::new(display),
-        ));
-        let surface = instance
-            .create_surface(window.clone())
-            .map_err(|e| e.to_string())?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
+        let mut error = String::from("no graphics API");
+        for backends in [FIRST_CHOICE, FALLBACK] {
+            let descriptor = wgpu::InstanceDescriptor {
+                backends,
+                ..wgpu::InstanceDescriptor::new_with_display_handle(Box::new(display.clone()))
+            }
+            .with_env();
+            let instance = wgpu::Instance::new(descriptor);
+            let surface = instance
+                .create_surface(window.clone())
+                .map_err(|e| e.to_string())?;
+            let options = wgpu::RequestAdapterOptions {
                 compatible_surface: Some(&surface),
                 ..Default::default()
-            })
-            .await
-            .map_err(|e| e.to_string())?;
-        let capabilities = surface.get_capabilities(&adapter);
+            };
+            match instance.request_adapter(&options).await {
+                Ok(adapter) => {
+                    return Self::with_adapter(instance, surface, &adapter, window).await;
+                }
+                Err(e) => error = e.to_string(),
+            }
+        }
+        Err(error)
+    }
+
+    async fn with_adapter(
+        instance: wgpu::Instance,
+        surface: wgpu::Surface<'static>,
+        adapter: &wgpu::Adapter,
+        window: Arc<Window>,
+    ) -> Result<Self, String> {
+        let capabilities = surface.get_capabilities(adapter);
         let format = capabilities.formats[0];
         let view_format = format.add_srgb_suffix();
-        let context = Context::new(&adapter, "resume", view_format).await?;
+        let context = Context::new(adapter, "resume", view_format).await?;
         let size = surface_size(&window);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -114,6 +146,7 @@ impl Gpu {
             skipped: 0,
         };
         gpu.configure();
+        startup::mark("surface configured");
         log::info!(
             "surface: {:?} (drawn as {:?}), {}x{}, {:?}",
             gpu.config.format,

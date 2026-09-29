@@ -8,8 +8,9 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::debug::startup;
 use crate::debug::stats::{self, Stats};
-use crate::render::gpu::Context;
+use crate::render::gpu::{self, Context};
 use crate::render::renderer::Renderer;
 use crate::scene::intro::{self, Intro};
 use crate::scene::{Input, Metrics, Scene};
@@ -214,6 +215,7 @@ pub fn run(request: &Request) -> Result<(), String> {
     let view = target.create_view(&Default::default());
     std::fs::create_dir_all(&request.dir).map_err(|e| format!("{}: {e}", request.dir.display()))?;
 
+    let mut first = true;
     for frame in frames {
         simulate(&mut renderer, &ctx, &mut intro, frame.position, frame.until);
         let station = frame.position.round() as usize;
@@ -283,12 +285,19 @@ pub fn run(request: &Request) -> Result<(), String> {
         renderer.set_groups(&ctx, None, focused, scene.relations(focused));
         renderer.draw(&ctx, &view, request.size, &camera, projection);
         let rgba = read_back(&ctx, &target)?;
+        if first {
+            startup::mark("first image");
+            first = false;
+        }
         let path = request.dir.join(format!("{}.png", frame.name));
         // Written even if blank, so the failure can be inspected.
         write_png(&path, request.size, &rgba)?;
         check_rendered(&rgba).map_err(|e| format!("{}: {e}", path.display()))?;
         log::info!("wrote {}", path.display());
     }
+    // For CI's job summary.
+    let table = request.dir.join("startup.md");
+    std::fs::write(&table, startup::table()).map_err(|e| format!("{}: {e}", table.display()))?;
     Ok(())
 }
 
@@ -302,12 +311,23 @@ pub fn parse_size(text: &str) -> Option<[u32; 2]> {
 }
 
 async fn context() -> Result<Context, String> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle().with_env());
-    let adapter = wgpu::util::initialize_adapter_from_env_or_default(&instance, None)
-        .await
-        .map_err(|e| format!("no GPU adapter: {e}"))?;
-    Context::new(&adapter, "screenshots", wgpu::TextureFormat::Rgba8UnormSrgb).await
+    let mut error = String::new();
+    for backends in [gpu::FIRST_CHOICE, gpu::FALLBACK] {
+        let descriptor = wgpu::InstanceDescriptor {
+            backends,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        }
+        .with_env();
+        let instance = wgpu::Instance::new(descriptor);
+        match wgpu::util::initialize_adapter_from_env_or_default(&instance, None).await {
+            Ok(adapter) => {
+                let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+                return Context::new(&adapter, "screenshots", format).await;
+            }
+            Err(e) => error = e.to_string(),
+        }
+    }
+    Err(format!("no GPU adapter: {error}"))
 }
 
 /// Copies the texture to the CPU: tightly packed RGBA rows (sRGB-encoded).

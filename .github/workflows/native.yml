@@ -36,7 +36,7 @@ jobs:
             archive: resume-3d-macos-arm64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install toolchain from rust-toolchain.toml
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -54,6 +54,13 @@ jobs:
           target/release/resume-3d --screenshots screenshots
           # A portrait phone (390x844 at 3x): the compact layout.
           target/release/resume-3d --screenshots screenshots/phone --size 1170x2532 --scale 3 --touch
+          # How long the headless start took, phase by phase (software Vulkan,
+          # so slower than a real GPU; for spotting regressions).
+          {
+            echo "### Startup (headless, software Vulkan)"
+            echo
+            cat screenshots/startup.md
+          } >> "$GITHUB_STEP_SUMMARY"
       # Also when a station came out blank, to see what went wrong.
       - name: Upload screenshots
         if: ${{ !cancelled() && inputs.screenshots && runner.os == 'Linux' }}

@@ -28,6 +28,7 @@ pub fn run() {
         std::panic::set_hook(Box::new(console_error_panic_hook::hook));
         let _ = console_log::init_with_level(log::Level::Info);
     }
+    debug::startup::start();
 
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(dir) = arg("--screenshots") {
@@ -55,6 +56,7 @@ fn android_main(android: winit::platform::android::activity::AndroidApp) {
             .with_max_level(log::LevelFilter::Info)
             .with_tag("resume-3d"),
     );
+    debug::startup::start();
     let event_loop = EventLoop::<app::AppEvent>::with_user_event()
         .with_android_app(android)
         .build()
