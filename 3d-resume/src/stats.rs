@@ -29,6 +29,8 @@ pub struct GpuTimes {
     pub draw_ms: f32,
     /// The particle simulation, when it ran that frame.
     pub particles_ms: Option<f32>,
+    /// The bloom passes, with bloom.
+    pub bloom_ms: Option<f32>,
 }
 
 /// The recent frames, and when the overlay's text last refreshed.
@@ -166,13 +168,15 @@ pub fn lines(summary: &Summary, info: &Info) -> Vec<String> {
     let gpu = match (info.gpu_timing, summary.gpu) {
         (false, _) => "GPU time not available here".to_owned(),
         (true, None) => "GPU –".to_owned(),
-        (true, Some(times)) => match times.particles_ms {
-            Some(particles) => format!(
-                "GPU {:.2} ms draw + {particles:.2} ms particles",
-                times.draw_ms
-            ),
-            None => format!("GPU {:.2} ms draw", times.draw_ms),
-        },
+        (true, Some(times)) => {
+            let mut gpu = format!("GPU {:.2} ms draw", times.draw_ms);
+            for (label, ms) in [("bloom", times.bloom_ms), ("particles", times.particles_ms)] {
+                if let Some(ms) = ms {
+                    gpu.push_str(&format!(" + {ms:.2} ms {label}"));
+                }
+            }
+            gpu
+        }
     };
     lines.push(gpu);
     lines.push(if info.animating {
@@ -289,6 +293,7 @@ mod tests {
             gpu: Some(GpuTimes {
                 draw_ms: 0.42,
                 particles_ms: Some(0.1),
+                bloom_ms: Some(0.25),
             }),
         };
         let info = Info {
@@ -309,7 +314,10 @@ mod tests {
         assert_eq!(lines[0], "Performance");
         assert_eq!(lines[1], "60 fps · frame 16.7 ms (max 18.2)");
         assert_eq!(lines[2], "CPU 0.84 ms · display wait 15.2 ms");
-        assert_eq!(lines[3], "GPU 0.42 ms draw + 0.10 ms particles");
+        assert_eq!(
+            lines[3],
+            "GPU 0.42 ms draw + 0.25 ms bloom + 0.10 ms particles"
+        );
         assert!(lines[4].starts_with("Rendering: on demand, idle"));
         assert_eq!(
             lines[5],

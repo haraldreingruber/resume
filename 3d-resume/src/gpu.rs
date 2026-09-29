@@ -18,6 +18,8 @@ pub struct Context {
     pub compute: bool,
     /// The backend and GPU (shown in the About panel).
     pub adapter: wgpu::AdapterInfo,
+    /// Whether it renders to floating-point textures (for bloom).
+    pub hdr: bool,
 }
 
 impl Context {
@@ -55,6 +57,7 @@ impl Context {
             view_format,
             compute,
             adapter: info,
+            hdr: crate::bloom::supported(adapter),
         })
     }
 }

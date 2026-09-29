@@ -1,15 +1,18 @@
 //! Draws a frame: gradient background, the scene's lines (skill map) and
 //! shapes, the intro particles and the MSDF glyphs, then the screen-space
-//! layer (buttons, panels) on top. Draws into any texture view: the window
-//! surface or an offscreen screenshot target. With timing on (performance
-//! overlay), it measures its passes on the GPU.
+//! layer (buttons, panels) on top. With bloom (where the GPU renders to
+//! floating-point textures), the scene goes through an HDR texture and gets
+//! a glow before the screen-space layer is drawn. Draws into any texture
+//! view: the window surface or an offscreen screenshot target. With timing
+//! on (performance overlay), it measures its passes on the GPU.
 
 use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 use wgpu::util::DeviceExt;
 
+use crate::bloom::{self, Bloom};
 use crate::gpu::Context;
-use crate::gpu_timer::GpuTimer;
+use crate::gpu_timer::{GpuTimer, Pass};
 use crate::intro::Step;
 use crate::lines::LineInstance;
 use crate::particles::Particles;
@@ -74,11 +77,123 @@ impl Instances {
     }
 }
 
-pub struct Renderer {
+/// The shader modules the layers draw with.
+struct Shaders {
+    text: wgpu::ShaderModule,
+    shapes: wgpu::ShaderModule,
+    lines: wgpu::ShaderModule,
+    background: wgpu::ShaderModule,
+}
+
+/// The layers' pipelines for one target format.
+struct Pipelines {
     background: wgpu::RenderPipeline,
     text: wgpu::RenderPipeline,
     shapes: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
+}
+
+impl Pipelines {
+    fn new(
+        ctx: &Context,
+        layout: &wgpu::PipelineLayout,
+        shaders: &Shaders,
+        format: wgpu::TextureFormat,
+    ) -> Self {
+        let instanced = |label, shader, stride, attributes: &[wgpu::VertexAttribute]| {
+            instanced_pipeline(ctx, label, layout, shader, stride, attributes, format)
+        };
+        let text = instanced(
+            "text",
+            &shaders.text,
+            size_of::<GlyphInstance>(),
+            &wgpu::vertex_attr_array![
+                0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32, 4 => Uint32
+            ],
+        );
+        let shapes = instanced(
+            "shapes",
+            &shaders.shapes,
+            size_of::<ShapeInstance>(),
+            &wgpu::vertex_attr_array![
+                0 => Float32x4, 1 => Float32x4, 2 => Float32, 3 => Float32, 4 => Float32, 5 => Uint32
+            ],
+        );
+        let lines = instanced(
+            "lines",
+            &shaders.lines,
+            size_of::<LineInstance>(),
+            &wgpu::vertex_attr_array![
+                0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Uint32x2
+            ],
+        );
+        let background_layout =
+            ctx.device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("background"),
+                    bind_group_layouts: &[],
+                    immediate_size: 0,
+                });
+        let background = ctx
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("background"),
+                layout: Some(&background_layout),
+                vertex: wgpu::VertexState {
+                    module: &shaders.background,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shaders.background,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(format.into())],
+                }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            });
+        Self {
+            background,
+            text,
+            shapes,
+            lines,
+        }
+    }
+
+    /// A layer's lines, shapes, the particles (if given) and glyphs.
+    fn draw_layer(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        layer: &Layer,
+        particles: Option<&Particles>,
+    ) {
+        pass.set_bind_group(0, &layer.bind_group, &[]);
+        pass.set_pipeline(&self.lines);
+        layer.lines.draw(pass);
+        pass.set_pipeline(&self.shapes);
+        layer.shapes.draw(pass);
+        // Under the text, so the settled particles hide behind the crisp
+        // title.
+        if let Some(particles) = particles {
+            particles.draw(pass);
+        }
+        pass.set_pipeline(&self.text);
+        layer.glyphs.draw(pass);
+    }
+}
+
+pub struct Renderer {
+    /// The scene's pipelines (in `scene_format`), and the screen-space
+    /// layer's when that differs (with bloom).
+    scene_pipelines: Pipelines,
+    ui_pipelines: Option<Pipelines>,
+    scene_format: wgpu::TextureFormat,
+    bloom: Option<Bloom>,
     /// Per hover group: `x` = highlight, `y` = keyboard focus (focus ring),
     /// `z` = fade-out (the title while the particles form it; skill-map
     /// nodes unrelated to the active one), `w` = the skill map's active node.
@@ -202,80 +317,35 @@ impl Renderer {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let text_shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/text.wgsl"));
-        let text = instanced_pipeline(
-            ctx,
-            "text",
-            &scene_layout,
-            &text_shader,
-            size_of::<GlyphInstance>(),
-            &wgpu::vertex_attr_array![
-                0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32, 4 => Uint32
-            ],
-        );
-        let shapes_shader =
-            device.create_shader_module(wgpu::include_wgsl!("../shaders/shapes.wgsl"));
-        let shapes = instanced_pipeline(
-            ctx,
-            "shapes",
-            &scene_layout,
-            &shapes_shader,
-            size_of::<ShapeInstance>(),
-            &wgpu::vertex_attr_array![
-                0 => Float32x4, 1 => Float32x4, 2 => Float32, 3 => Float32, 4 => Float32, 5 => Uint32
-            ],
-        );
-        let lines_shader =
-            device.create_shader_module(wgpu::include_wgsl!("../shaders/lines.wgsl"));
-        let lines = instanced_pipeline(
-            ctx,
-            "lines",
-            &scene_layout,
-            &lines_shader,
-            size_of::<LineInstance>(),
-            &wgpu::vertex_attr_array![
-                0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Uint32x2
-            ],
-        );
-
-        let background_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("background"),
-            bind_group_layouts: &[],
-            immediate_size: 0,
-        });
-        let background_shader =
-            device.create_shader_module(wgpu::include_wgsl!("../shaders/background.wgsl"));
-        let background = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("background"),
-            layout: Some(&background_layout),
-            vertex: wgpu::VertexState {
-                module: &background_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &background_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(ctx.view_format.into())],
-            }),
-            primitive: Default::default(),
-            depth_stencil: None,
-            multisample: Default::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let shaders = Shaders {
+            text: device.create_shader_module(wgpu::include_wgsl!("../shaders/text.wgsl")),
+            shapes: device.create_shader_module(wgpu::include_wgsl!("../shaders/shapes.wgsl")),
+            lines: device.create_shader_module(wgpu::include_wgsl!("../shaders/lines.wgsl")),
+            background: device
+                .create_shader_module(wgpu::include_wgsl!("../shaders/background.wgsl")),
+        };
+        // With bloom, the scene renders in HDR and the screen-space layer
+        // on top of the result, in the window's format.
+        let bloom = ctx.hdr.then(|| Bloom::new(ctx));
+        let scene_format = if bloom.is_some() {
+            bloom::HDR
+        } else {
+            ctx.view_format
+        };
+        let scene_pipelines = Pipelines::new(ctx, &scene_layout, &shaders, scene_format);
+        let ui_pipelines = bloom
+            .is_some()
+            .then(|| Pipelines::new(ctx, &scene_layout, &shaders, ctx.view_format));
 
         let particles = particles
-            .then(|| Particles::new(ctx, &layout, &scene.title, &atlas_pixels))
+            .then(|| Particles::new(ctx, &layout, &scene.title, &atlas_pixels, scene_format))
             .flatten();
 
         Self {
-            background,
-            text,
-            shapes,
-            lines,
+            scene_pipelines,
+            ui_pipelines,
+            scene_format,
+            bloom,
             groups,
             group_state: GroupState {
                 hovered: None,
@@ -299,8 +369,13 @@ impl Renderer {
         self.world.shapes = Instances::new(device, "shapes", &scene.shapes);
         self.world.lines = Instances::new(device, "lines", &scene.lines);
         if self.particles.is_some() {
-            self.particles =
-                Particles::new(ctx, &self.bind_layout, &scene.title, &text::atlas_rgba());
+            self.particles = Particles::new(
+                ctx,
+                &self.bind_layout,
+                &scene.title,
+                &text::atlas_rgba(),
+                self.scene_format,
+            );
         }
         self.set_groups(ctx, None, None, None);
     }
@@ -420,13 +495,15 @@ impl Renderer {
             + self.groups.size()
             + self.particles.as_ref().map_or(0, Particles::bytes)
             + self.timer.as_ref().map_or(0, GpuTimer::bytes)
+            + self.bloom.as_ref().map_or(0, Bloom::bytes)
     }
 
-    /// Draws a frame into `target` (a view in `ctx.view_format`).
+    /// Draws a frame into `target` (a `size` view in `ctx.view_format`).
     pub fn draw(
         &mut self,
         ctx: &Context,
         target: &wgpu::TextureView,
+        size: [u32; 2],
         camera: &Camera,
         ui_projection: Mat4,
     ) {
@@ -452,41 +529,32 @@ impl Renderer {
         ctx.queue
             .write_buffer(&self.ui.globals, 0, bytemuck::bytes_of(&ui));
 
+        if let Some(bloom) = &mut self.bloom {
+            bloom.prepare(ctx, size);
+        }
         let mut encoder = ctx.device.create_command_encoder(&Default::default());
+        let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("frame"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: self.timer.as_mut().and_then(GpuTimer::render_writes),
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_pipeline(&self.background);
+            // The scene: into the HDR texture with bloom, else straight into
+            // the target, the screen-space layer included.
+            let view = self.bloom.as_ref().map_or(target, Bloom::scene);
+            let timestamps = self
+                .timer
+                .as_mut()
+                .and_then(|timer| timer.render_writes(Pass::Draw, true, true));
+            let mut pass = begin_pass(&mut encoder, "scene", view, clear, timestamps);
+            let pipelines = &self.scene_pipelines;
+            pass.set_pipeline(&pipelines.background);
             pass.draw(0..3, 0..1);
-
-            for (layer, world) in [(&self.world, true), (&self.ui, false)] {
-                pass.set_bind_group(0, &layer.bind_group, &[]);
-                pass.set_pipeline(&self.lines);
-                layer.lines.draw(&mut pass);
-                pass.set_pipeline(&self.shapes);
-                layer.shapes.draw(&mut pass);
-                // Under the text, so the settled particles hide behind the
-                // crisp title.
-                if world && let Some(particles) = &self.particles {
-                    particles.draw(&mut pass);
-                }
-                pass.set_pipeline(&self.text);
-                layer.glyphs.draw(&mut pass);
+            pipelines.draw_layer(&mut pass, &self.world, self.particles.as_ref());
+            if self.bloom.is_none() {
+                pipelines.draw_layer(&mut pass, &self.ui, None);
             }
+        }
+        if let (Some(bloom), Some(pipelines)) = (&self.bloom, &self.ui_pipelines) {
+            bloom.apply(&mut encoder, target, self.timer.as_mut());
+            let mut pass = begin_pass(&mut encoder, "ui", target, wgpu::LoadOp::Load, None);
+            pipelines.draw_layer(&mut pass, &self.ui, None);
         }
         if let Some(timer) = &mut self.timer {
             timer.resolve(&mut encoder);
@@ -498,7 +566,34 @@ impl Renderer {
     }
 }
 
-/// A pipeline drawing one premultiplied-alpha quad (triangle strip) per instance.
+/// A render pass with one color attachment.
+fn begin_pass<'a>(
+    encoder: &'a mut wgpu::CommandEncoder,
+    label: &str,
+    view: &wgpu::TextureView,
+    load: wgpu::LoadOp<wgpu::Color>,
+    timestamps: Option<wgpu::RenderPassTimestampWrites<'_>>,
+) -> wgpu::RenderPass<'a> {
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some(label),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load,
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: timestamps,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    })
+}
+
+/// A pipeline drawing one premultiplied-alpha quad (triangle strip) per
+/// instance into `format`.
 fn instanced_pipeline(
     ctx: &Context,
     label: &str,
@@ -506,6 +601,7 @@ fn instanced_pipeline(
     shader: &wgpu::ShaderModule,
     stride: usize,
     attributes: &[wgpu::VertexAttribute],
+    format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     ctx.device
         .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -526,7 +622,7 @@ fn instanced_pipeline(
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: ctx.view_format,
+                    format,
                     blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -581,6 +677,7 @@ mod tests {
             ("text.wgsl", include_str!("../shaders/text.wgsl")),
             ("shapes.wgsl", include_str!("../shaders/shapes.wgsl")),
             ("lines.wgsl", include_str!("../shaders/lines.wgsl")),
+            ("bloom.wgsl", include_str!("../shaders/bloom.wgsl")),
             ("particles.wgsl", include_str!("../shaders/particles.wgsl")),
             (
                 "particles_sim.wgsl",

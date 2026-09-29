@@ -6,6 +6,7 @@ mod about;
 #[cfg(target_os = "android")]
 mod android;
 mod app;
+mod bloom;
 mod content;
 mod focus;
 mod gpu;

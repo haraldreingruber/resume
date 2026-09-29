@@ -32,8 +32,9 @@ pub const ABOUT: About = About {
             text: "Text comes from multi-channel signed distance fields (MSDF) baked at \
                    build time, so it stays sharp at any distance. Cards, chips and dots are \
                    instanced SDF shapes, and the skill map's edges instanced line segments. \
-                   A compute shader moves the intro's 16,384 particles. Frames are drawn \
-                   only while something moves: at rest, the GPU is idle.",
+                   A compute shader moves the intro's 16,384 particles, and an HDR bloom \
+                   pass lets bright text and particles glow. Frames are drawn only while \
+                   something moves: at rest, the GPU is idle.",
         },
     ],
     source_label: "Source code on GitHub",
