@@ -2,34 +2,18 @@
 //! app (DX12 / Vulkan / Metal via wgpu) and the phone builds (Android via
 //! `android_main`, iOS through the regular program).
 
-mod about;
-#[cfg(target_os = "android")]
-mod android;
 mod app;
-mod bloom;
 mod content;
-mod focus;
-mod gpu;
-mod gpu_timer;
-#[cfg(not(target_arch = "wasm32"))]
-mod icon;
-mod intro;
-mod lines;
-mod links;
-mod particles;
-mod renderer;
+mod debug;
+mod platform;
+mod render;
 mod scene;
-#[cfg(not(target_arch = "wasm32"))]
-mod screenshot;
-mod shapes;
-mod skillmap;
-mod stats;
-mod text;
-mod timeline;
 mod ui;
-#[cfg(target_arch = "wasm32")]
-mod web;
 
+#[cfg(not(target_arch = "wasm32"))]
+use debug::screenshot;
+#[cfg(target_arch = "wasm32")]
+use platform::web;
 use winit::event_loop::EventLoop;
 
 /// Starts the app (desktop, iOS or web); see `android_main` for Android.

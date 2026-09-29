@@ -7,8 +7,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use crate::gpu::Context;
-use crate::stats::GpuTimes;
+use crate::debug::stats::GpuTimes;
+use crate::render::gpu::Context;
 
 /// Readback buffer states.
 const FREE: u8 = 0;

@@ -4,13 +4,16 @@
 //! on every platform, and in the native app the "ⓘ · Skills · Text version ·
 //! PDF" buttons that the web page provides as HTML.
 
+pub mod about;
+pub mod focus;
+
 use glam::{Mat4, Vec3};
 use resume_model::about::ABOUT;
 
+use crate::debug::stats::{GraphFrame, HISTORY};
+use crate::render::shapes::ShapeInstance;
+use crate::render::text::{self, Font, GlyphInstance, Run, TextStyle, rgb};
 use crate::scene::{Action, Link, Scene};
-use crate::shapes::ShapeInstance;
-use crate::stats::{GraphFrame, HISTORY};
-use crate::text::{self, Font, GlyphInstance, Run, TextStyle, rgb};
 
 const BUTTON_TEXT: [f32; 4] = rgb(0xC9D4DE);
 const BUTTON_BORDER: [f32; 4] = rgb(0x3E5A73);

@@ -8,13 +8,13 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::about;
-use crate::focus;
-use crate::gpu::Context;
-use crate::intro::{self, Intro};
-use crate::renderer::Renderer;
+use crate::debug::stats::{self, Stats};
+use crate::render::gpu::Context;
+use crate::render::renderer::Renderer;
+use crate::scene::intro::{self, Intro};
 use crate::scene::{Input, Metrics, Scene};
-use crate::stats::{self, Stats};
+use crate::ui::about;
+use crate::ui::focus;
 use crate::ui::{self, Insets, Overlay, Panel, Switch, UiLayer};
 
 /// The native window's default (logical) size.

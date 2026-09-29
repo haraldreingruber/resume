@@ -4,8 +4,8 @@
 //! window. Overlapping particles add up beyond 1 there, so they glow most.
 //! See `shaders/bloom.wgsl`.
 
-use crate::gpu::Context;
-use crate::gpu_timer::{GpuTimer, Pass};
+use crate::debug::gpu_timer::{GpuTimer, Pass};
+use crate::render::gpu::Context;
 
 /// Format of the scene and the glow: floating point, so bright parts can
 /// exceed 1 and blending stays precise.
@@ -96,7 +96,7 @@ impl Bloom {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/bloom.wgsl"));
+        let shader = device.create_shader_module(wgpu::include_wgsl!("../../shaders/bloom.wgsl"));
         let pipeline = |entry: &str, format, blend| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(entry),

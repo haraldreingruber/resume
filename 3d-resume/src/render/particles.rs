@@ -9,10 +9,10 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use wgpu::util::DeviceExt;
 
-use crate::gpu::Context;
-use crate::intro::Step;
+use crate::render::gpu::Context;
+use crate::render::text::{self, GlyphInstance};
 use crate::scene::Title;
-use crate::text::{self, GlyphInstance};
+use crate::scene::intro::Step;
 
 /// Particles in the name (fewer only if the title were tiny).
 pub const COUNT: usize = 16_384;
@@ -144,7 +144,7 @@ impl Particles {
             ],
         });
         let simulate_shader =
-            device.create_shader_module(wgpu::include_wgsl!("../shaders/particles_sim.wgsl"));
+            device.create_shader_module(wgpu::include_wgsl!("../../shaders/particles_sim.wgsl"));
         let simulate = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("particle sim"),
             layout: Some(
@@ -173,7 +173,7 @@ impl Particles {
             }],
         });
         let draw_shader =
-            device.create_shader_module(wgpu::include_wgsl!("../shaders/particles.wgsl"));
+            device.create_shader_module(wgpu::include_wgsl!("../../shaders/particles.wgsl"));
         let additive = wgpu::BlendState {
             color: wgpu::BlendComponent {
                 src_factor: wgpu::BlendFactor::One,
