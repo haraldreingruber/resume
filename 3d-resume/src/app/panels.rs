@@ -79,6 +79,8 @@ impl App {
             Some(&rail),
         );
         state.renderer.set_ui(&state.gpu.context, &state.ui);
+        #[cfg(accessibility)]
+        self.update_accessibility();
     }
 
     /// Recomputes the performance overlay's text (twice a second while it's
@@ -108,7 +110,7 @@ impl App {
     /// B or the overlay's switch: bloom's glow on or off.
     pub(super) fn toggle_glow(&mut self) {
         self.set_glow(!self.glow);
-        announce(if self.glow { "Bloom on" } else { "Bloom off" });
+        self.announce(if self.glow { "Bloom on" } else { "Bloom off" });
     }
 
     pub(super) fn set_glow(&mut self, on: bool) {
@@ -123,7 +125,7 @@ impl App {
     /// X or the overlay's switch: the x-ray view on or off.
     pub(super) fn toggle_xray(&mut self) {
         self.set_xray(!self.xray);
-        announce(if self.xray {
+        self.announce(if self.xray {
             "X-ray view on: outlines of every glyph, shape and click area"
         } else {
             "X-ray view off"
@@ -154,7 +156,7 @@ impl App {
             self.gpu_timing = state.renderer.set_timing(&state.gpu.context, show);
         }
         self.refresh_overlay(Instant::now());
-        announce(if show {
+        self.announce(if show {
             "Performance overlay shown"
         } else {
             "Performance overlay hidden"
@@ -183,7 +185,7 @@ impl App {
         #[cfg(target_arch = "wasm32")]
         crate::platform::web::show_about_expanded(open);
         if open {
-            announce(&about::announcement(&self.session));
+            self.announce(&about::announcement(&self.session));
         }
         // The panel may now be under (or gone from under) the cursor.
         self.update_hover();

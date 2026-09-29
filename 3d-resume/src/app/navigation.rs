@@ -41,9 +41,13 @@ impl App {
         self.focused = group;
         self.update_groups();
         self.publish_tab_leaves();
+        // Native screen readers follow the accessibility tree's focus instead.
+        #[cfg(not(accessibility))]
         if let Some(description) = group.and_then(|g| self.scene.describe(g)) {
-            announce(&description);
+            self.announce(&description);
         }
+        #[cfg(accessibility)]
+        self.update_accessibility();
     }
 
     /// Tells the page whether the next Tab / Shift+Tab leaves the canvas.

@@ -565,23 +565,50 @@ impl Scene {
         self.summaries.get(station).map(String::as_str)
     }
 
+    /// What `group`'s link or button is called.
+    pub fn label(&self, group: u32) -> Option<&str> {
+        let index = (group as usize).checked_sub(1)?;
+        self.labels.get(index).map(String::as_str)
+    }
+
+    /// The names of a skill-map node's connections (its skills, or the
+    /// entries that used it), comma-separated; empty for other groups.
+    pub fn related(&self, group: u32) -> String {
+        let related = self
+            .relations(Some(group))
+            .map(|r| r.related)
+            .unwrap_or_default();
+        let names: Vec<&str> = related.iter().filter_map(|&g| self.label(g)).collect();
+        names.join(", ")
+    }
+
+    /// Where `group`'s click area is on screen, in normalized device
+    /// coordinates (-1..1, y up): the box around its rectangles' corners.
+    /// `None` for groups outside the scene (e.g. screen-space buttons).
+    #[cfg(accessibility)]
+    pub fn screen_bounds(&self, camera: &Camera, group: u32) -> Option<[f32; 4]> {
+        self.hits
+            .iter()
+            .filter(|hit| hit.group == group)
+            .flat_map(|hit| {
+                let [x0, y0, x1, y1] = hit.rect;
+                [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
+                    .map(|(x, y)| camera.view_proj.project_point3(Vec3::new(x, y, hit.z)))
+            })
+            .fold(None, |bounds, p| {
+                let [x0, y0, x1, y1] = bounds.unwrap_or([p.x, p.y, p.x, p.y]);
+                Some([x0.min(p.x), y0.min(p.y), x1.max(p.x), y1.max(p.y)])
+            })
+    }
+
     /// What a screen reader announces when `group` gets keyboard focus: the
-    /// link or button, or a skill-map node with its connections.
+    /// link or button, or a skill-map node with its connections. (Native
+    /// screen readers read the accessibility tree's nodes instead.)
+    #[cfg(any(not(accessibility), test))]
     pub fn describe(&self, group: u32) -> Option<String> {
         let index = (group as usize).checked_sub(1)?;
         let (action, label) = (self.actions.get(index)?, self.labels.get(index)?);
-        let related = || {
-            let related = self
-                .relations(Some(group))
-                .map(|r| r.related)
-                .unwrap_or_default();
-            let names: Vec<&str> = related
-                .iter()
-                .filter_map(|&g| self.labels.get(g as usize - 1))
-                .map(String::as_str)
-                .collect();
-            names.join(", ")
-        };
+        let related = || self.related(group);
         Some(match action {
             Action::Open(Link::Url(_)) => format!("{label}, link"),
             Action::Open(_)
@@ -592,7 +619,11 @@ impl Scene {
             | Action::ToggleXray => {
                 format!("{label}, button")
             }
-            Action::GoToStation(_) => format!("{label}: {}. Press Enter to go there.", related()),
+            // A skill-map entry lists its skills; a rail marker has none.
+            Action::GoToStation(_) => match related() {
+                skills if skills.is_empty() => format!("{label}. Press Enter to go there."),
+                skills => format!("{label}: {skills}. Press Enter to go there."),
+            },
             Action::Pin => match related() {
                 used if used.is_empty() => label.clone(),
                 used => format!("{label}, used at {used}"),
@@ -1620,5 +1651,38 @@ mod tests {
         let far_away = scene.camera(0.0, &lens);
         let ndc = far_away.view_proj.project_point3(center).truncate();
         assert_eq!(scene.pick(&far_away, ndc), None);
+    }
+
+    #[test]
+    fn screen_bounds_frame_a_link_where_it_is_picked() {
+        let scene = Scene::new(&crate::content::resume());
+        let lens = scene.lens(16.0 / 9.0);
+        let outro = scene.station_count() - 1;
+        let camera = scene.camera(outro as f32, &lens);
+        let group = scene.links(outro).start;
+        let [x0, y0, x1, y1] = scene.screen_bounds(&camera, group).unwrap();
+        assert!(-1.0 < x0 && x0 < x1 && x1 < 1.0, "{x0} {x1}");
+        assert!(-1.0 < y0 && y0 < y1 && y1 < 1.0, "{y0} {y1}");
+        let center = Vec2::new((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+        assert_eq!(scene.pick(&camera, center), Some(group));
+        // Not in the scene: e.g. a screen-space button.
+        assert_eq!(scene.screen_bounds(&camera, 0), None);
+    }
+
+    #[test]
+    fn labels_and_connections_for_screen_readers() {
+        let mut scene = Scene::new(&crate::content::resume());
+        let outro = scene.links(scene.station_count() - 1).start;
+        assert_eq!(scene.label(outro), Some("harald.reingruber@gmail.com"));
+        assert_eq!(scene.label(0), None);
+        assert_eq!(scene.related(outro), "");
+        let map = scene.links(scene.skills_station());
+        assert!(scene.related(map.start).starts_with("Rust, "));
+        // A link to a station without skills (like a timeline rail marker).
+        let marker = scene.add_action(Action::GoToStation(1), "2020, Dedalus");
+        assert_eq!(
+            scene.describe(marker).unwrap(),
+            "2020, Dedalus. Press Enter to go there."
+        );
     }
 }
