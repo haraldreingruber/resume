@@ -1,8 +1,9 @@
 //! Bakes content and fonts at build time, so the app ships no YAML, Markdown
 //! or font parser and no font files:
 //! - `resume.postcard`: the normalized resume from `content/resume.yaml`
-//! - `atlas.png` + `glyphs.rs`: a multi-channel signed distance field (MSDF)
-//!   atlas holding exactly the glyphs the content can display, plus metrics.
+//! - `atlas.bin` + `glyphs.rs`: a multi-channel signed distance field (MSDF)
+//!   atlas holding exactly the glyphs the content can display (stored as
+//!   `src/render/atlas_codec.rs` describes), plus metrics.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -15,9 +16,13 @@ use fdsm::generate::generate_msdf;
 use fdsm::render::correct_sign_msdf;
 use fdsm::shape::Shape;
 use fdsm::transform::Transform;
-use image::{Rgb32FImage, RgbImage, RgbaImage};
+use image::{Rgb32FImage, RgbImage};
 use nalgebra::{Affine2, Similarity2, Vector2};
 use resume_model::Resume;
+
+// The atlas format, shared with the app (which decodes it).
+#[path = "src/render/atlas_codec.rs"]
+mod atlas_codec;
 use ttf_parser::Face;
 
 /// Font files, indexed by `text::Font` in the app.
@@ -109,20 +114,16 @@ fn bake_atlas(manifest: &Path, out: &Path, chars: &BTreeSet<char>) {
     }
 
     let height = pack(&mut glyphs);
-    let mut atlas = RgbaImage::new(ATLAS_WIDTH, height);
+    let mut atlas = RgbImage::new(ATLAS_WIDTH, height);
     for glyph in &glyphs {
         if let Some(image) = &glyph.image {
             for (x, y, pixel) in image.enumerate_pixels() {
-                let [r, g, b] = pixel.0;
-                atlas.put_pixel(
-                    glyph.atlas_pos.0 + x,
-                    glyph.atlas_pos.1 + y,
-                    image::Rgba([r, g, b, 255]),
-                );
+                atlas.put_pixel(glyph.atlas_pos.0 + x, glyph.atlas_pos.1 + y, *pixel);
             }
         }
     }
-    atlas.save(out.join("atlas.png")).expect("write atlas");
+    let encoded = atlas_codec::encode(atlas.as_raw(), ATLAS_WIDTH as usize, height as usize);
+    fs::write(out.join("atlas.bin"), encoded).expect("write atlas");
     fs::write(
         out.join("glyphs.rs"),
         glyph_table(&glyphs, &metrics, height),
