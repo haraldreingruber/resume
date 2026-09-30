@@ -11,6 +11,12 @@ updates:
       cargo:
         update-types: [minor, patch]
     open-pull-requests-limit: 5
+    ignore:
+      # build.rs hands nalgebra types to fdsm (the MSDF generator), so both
+      # must use the same nalgebra; fdsm 0.8 uses 0.34. Lift this once fdsm
+      # moves on.
+      - dependency-name: nalgebra
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: github-actions
     directory: /
