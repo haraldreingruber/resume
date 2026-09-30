@@ -2694,7 +2694,6 @@ dependencies = [
  "memory-stats",
  "naga",
  "nalgebra",
- "ndk-context",
  "open",
  "png",
  "pollster",
