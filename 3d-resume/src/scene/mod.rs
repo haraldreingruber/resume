@@ -1654,6 +1654,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(accessibility)]
     fn screen_bounds_frame_a_link_where_it_is_picked() {
         let scene = Scene::new(&crate::content::resume());
         let lens = scene.lens(16.0 / 9.0);
