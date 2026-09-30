@@ -27,21 +27,21 @@ pub fn hide_system_bars() {
         return;
     };
     // The window belongs to the UI thread, not the app's (this) thread.
-    app.run_on_java_main_thread(Box::new(|| {
-        if let Err(error) = hide_system_bars_now() {
-            log::warn!("hiding the system bars failed: {error}");
-        }
+    app.run_on_java_main_thread(Box::new(|| match hide_system_bars_now() {
+        Ok(sdk) => log::info!("system bars hidden (Android API level {sdk})"),
+        Err(error) => log::warn!("hiding the system bars failed: {error}"),
     }));
 }
 
-fn hide_system_bars_now() -> Result<(), String> {
+/// Returns the Android API level.
+fn hide_system_bars_now() -> Result<i32, String> {
     let context = ndk_context::android_context();
     // SAFETY: as in `open_url`.
     let vm = unsafe { JavaVM::from_raw(context.vm().cast()) };
     let activity_ref = context.context().cast();
     // Java exceptions are caught and returned as errors, so none reaches the
     // UI thread's loop.
-    vm.attach_current_thread(|env| -> jni::errors::Result<()> {
+    vm.attach_current_thread(|env| -> jni::errors::Result<i32> {
         // SAFETY: as in `open_url`.
         let activity = unsafe { Cast::<JObject>::from_raw(env, &activity_ref)? };
         let window = env
@@ -113,7 +113,7 @@ fn hide_system_bars_now() -> Result<(), String> {
                 &[JValue::Int(FLAGS)],
             )?;
         }
-        Ok(())
+        Ok(sdk)
     })
     .map_err(|e| e.to_string())
 }

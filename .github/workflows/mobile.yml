@@ -7,12 +7,14 @@ name: Mobile
 #   with `adb install`.
 # - iOS: a Simulator app (Apple silicon Macs); with `smoke_test`, it's
 #   launched in a simulator and screenshotted.
+# - With `smoke_test`, the APK is also launched on an Android emulator
+#   (x86_64): screenshot, log, and the system bars' state.
 # Called by ci.yml (every PR and push to main) and release.yml (tags).
 on:
   workflow_call:
     inputs:
       smoke_test:
-        description: Launch the iOS app in a simulator and upload a screenshot.
+        description: Launch the apps in a simulator and an emulator, and upload screenshots.
         type: boolean
         default: false
     secrets:
@@ -64,6 +66,38 @@ jobs:
         with:
           path: resume-3d-android.apk
           archive: false
+
+  android-emulator:
+    name: Android emulator
+    needs: android
+    if: inputs.smoke_test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: resume-3d-android.apk
+      # Hardware acceleration for the emulator.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"'             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Launch on an emulator (smoke test)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash .github/scripts/android-smoke.sh resume-3d-android.apk android-screenshot
+      - name: Upload the emulator screenshot and logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-emulator-screenshot
+          path: android-screenshot
 
   ios:
     name: iOS Simulator app
